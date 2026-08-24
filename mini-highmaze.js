@@ -1390,6 +1390,11 @@ function drawCat(g,gh){
   const fr=gh.frightened && !th.cozy;           // a hearth cat is never hunted
   const cast=castFor();
   if(cast && cast.def.m && cast.def.m[idx]){
+    /* Anchoring note (checked 2026-08-24 against Scott's "center on their
+       squares"): the sprite is already bottom-CENTRE anchored on the tile's
+       own projected point, the same point its shadow is drawn at — so feet
+       and shadow agree and the figure is centred on its cell by construction.
+       What was off was SCALE, handled by the per-cell k values in CASTS. */
     /* per-monster fright art when the cast carries it; near the end of the
        fright the sprite flickers back to true colours every 8 frames — the
        classic warning, told in paint instead of palette */
@@ -1672,15 +1677,19 @@ const CASTS={};
 /* THE DESERT SET (Scott's sheets, 2026-08-23 — "realistic little shiny
    plastic toys"): HOUND chases, WRAP ambushes, SHELL flanks, DUST — a
    drifting storm — wanders at half speed. Personalities cast the toys. */
+/* k = height multiplier. Scott, 2026-08-24: "try making them 25% taller and
+   wider" — so every k below is its original value x1.25, in one place, which
+   keeps the whole cast in proportion and makes the trial one number to undo.
+   Originals were hound 1.05 / wrap 1.10 / shell 0.62 / dust 0.95. */
 CASTS.egypt={src:'images/waka-cast-egypt.png?v=2026082310',
  m:[
-  [{x:2,y:2,w:194,h:140,k:1.05},{x:198,y:2,w:177,h:140,k:1.05}],    // hound
-  [{x:556,y:2,w:87,h:140,k:1.1},{x:645,y:2,w:89,h:140,k:1.1}],      // wrap
-  [{x:825,y:2,w:242,h:140,k:0.62},{x:1069,y:2,w:245,h:140,k:0.62}], // shell
-  [{x:1560,y:2,w:103,h:140,k:0.95},{x:1665,y:2,w:114,h:140,k:0.95}] // dust
+  [{x:2,y:2,w:194,h:140,k:1.3125},{x:198,y:2,w:177,h:140,k:1.3125}],  // hound
+  [{x:556,y:2,w:87,h:140,k:1.375},{x:645,y:2,w:89,h:140,k:1.375}],    // wrap
+  [{x:825,y:2,w:242,h:140,k:0.775},{x:1069,y:2,w:245,h:140,k:0.775}], // shell
+  [{x:1560,y:2,w:103,h:140,k:1.1875},{x:1665,y:2,w:114,h:140,k:1.1875}] // dust
  ],
- fm:[[{x:377,y:2,w:177,h:140,k:1.05}],[{x:736,y:2,w:87,h:140,k:1.1}],
-     [{x:1316,y:2,w:242,h:140,k:0.62}],[{x:1781,y:2,w:104,h:140,k:0.95}]]};
+ fm:[[{x:377,y:2,w:177,h:140,k:1.3125}],[{x:736,y:2,w:87,h:140,k:1.375}],
+     [{x:1316,y:2,w:242,h:140,k:0.775}],[{x:1781,y:2,w:104,h:140,k:1.1875}]]};
 const castImgs={};
 function castFor(){
   const name=THEME_ORDER.find(k=>THEMES[k]===th);
@@ -1908,11 +1917,15 @@ function draw(){
     }
     for(const sp of pills) if(!sp.taken && sp.r===r) drawBoltPill(g,sp);
     for(const b of bonuses) if(b.r===r){
-      /* bonuses hover ABOVE wall height — they can never be buried */
+      /* bonuses hover ABOVE wall height so they can never be buried — but
+         WZ+8 was overshoot (walls are only WZ=15 tall), which read as the
+         ankh and cherry floating well off their cell. WZ+2 keeps the
+         never-buried invariant and sits the prize back on its square.
+         (Scott, 2026-08-24: "the ankhs and cherries appear a little too high") */
       const hover=Math.sin(frame*0.07+b.c)*2.5;
       const blink=b.t<120 && (frame>>3)%2;
       if(blink) continue;
-      const bp=proj(tileWX(b.c)+TW/2, tileWY(b.r)+TH/2, WZ+8+EV(b.r));
+      const bp=proj(tileWX(b.c)+TW/2, tileWY(b.r)+TH/2, WZ+2+EV(b.r));
       const bf=proj(tileWX(b.c)+TW/2, tileWY(b.r)+TH/2, EV(b.r));
       GFX.shadow(g,bf.x,bf.y,9*bf.s,0.3);
       th.bonus.draw(g,bp.x,bp.y+hover,bp.s);

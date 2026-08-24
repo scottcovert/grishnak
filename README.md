@@ -57,8 +57,9 @@ Take it. Learn from it. Build your own rooms.
 - **Code: MIT.** Do what you like, keep the notice.
 - **Art and sound: CC BY 4.0.** Use them anywhere, credit GRISHNAK.
 
-Guides to expanding the universe — how a new game plugs into the shell, how a
-character sheet becomes a cast, how the map grows — are coming. If you build
+**[UNIVERSE.md](UNIVERSE.md) is the guide to expanding it** — the register, the
+naming laws, the build law, the art pipeline, and the layer contract a new game
+plugs into. Read that and you can add a room that belongs. If you build
 something on this, open an issue and show it.
 
 ## Author

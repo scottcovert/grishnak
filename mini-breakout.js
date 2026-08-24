@@ -169,12 +169,32 @@ const LEVELS=[
   "....++++....++++....++++....++++....++++....++++...",
   "....#+++++++#+++++++#####+++#####+++#####+++#+++++.",
   "....++++++++++++++++++++++++++++++++++++++++++++++."],
- ["...............",
-  "..1...1.1...1..",
-  "..2...2.2...2..",
-  "..2.K.2.2.K.2..",
-  "...333...333...",
-  "...###...###..."],
+ /* wall 2 — THE COOPERAGE (Scott, 2026-08-24: "decide for me about stonebreaker
+    wall 2"). The two shallow cups are gone; the wall is now a pun on its own
+    trade. Three barrels on a rack: 2-wide vertical blocks are the STAVES,
+    granular pairs band them as HOOPS top and bottom, and a keg sits as the
+    BUNG at each heart. The MIDDLE barrel is sealed — staves capped across its
+    mouth — so its keg cannot be struck directly and is only reached by
+    CHAINING a blast from a neighbour, which is the wall's whole lesson.
+    Three authoring laws visible at once: the bung keeps a '.' gutter each side
+    (width-scan absorb), the cap is two 2-wide pieces on the hoops' own pitch
+    (vertical absorb), and the rack is segmented one plate per hoop column
+    (a scan only stops on an anchor in its OWN column — the wall-1 lesson). */
+ ["...................................................",
+  "...................................................",
+  "..1+1+1+1+1+1+....1+1+1+1+1+1+....1+1+1+1+1+1+.....",
+  "..++++++++++++....++++++++++++....++++++++++++.....",
+  "..2+2+....2+2+....2+2+2+2+2+2+....2+2+....2+2+.....",
+  "..++++....++++....++++++++++++....++++....++++.....",
+  "..++++.K+.++++....++++.K+.++++....++++.K+.++++.....",
+  "..++++.++.++++....++++.++.++++....++++.++.++++.....",
+  "..++++....++++....++++....++++....++++....++++.....",
+  "..1+1+1+1+1+1+....1+1+1+1+1+1+....1+1+1+1+1+1+.....",
+  "..++++++++++++....++++++++++++....++++++++++++.....",
+  "..#+#+#+#+#+#+....#+#+#+#+#+#+....#+#+#+#+#+#+.....",
+  "..++++++++++++....++++++++++++....++++++++++++.....",
+  "...................................................",
+  "..................................................."],
  /* wall 3 — THE RIBS, remade in MIXED MASONRY (Scott, 2026-08-23: "add some
     of this brick mixing on levels 3, 5..."). Same wall, truer to its name:
     the four columns are now real 2x15 VERTICAL BLOCKS, the ribs are single
@@ -755,7 +775,7 @@ const WALL_KEYS='abcdefghijklmno';
    the 'g'-trap class again, sprung from OUTSIDE the file this time, where the
    tool-key pin can't see. The menu (W) is the durable fix: every wall, by
    name, arrows + ENTER — no letter can ever be stolen from it. */
-const WALL_NAMES=['THE CHIMNEY','THE KEG COVES','THE RIBS','THE SHELF',
+const WALL_NAMES=['THE CHIMNEY','THE COOPERAGE','THE RIBS','THE SHELF',
  'THE GALLERIES','TWO CATS','THE CLUTCH','THE QUARRY FIELD','THE TELL',
  'THE HEAVY STAR','THE PACHINKO DECK','THE VAULT','THE APPROACH','THE DESCENT',
  'THE BUMPERS','THE GRANITE','THE GREENWOOD','THE COOLING HOUSE','THE ANVIL',
@@ -883,6 +903,12 @@ const THUMP_T=90, THUMP_IN=10, THUMP_OUT=22;
 const CARDS={driv:'You Gotta THUMP It', loom:'Cut the Pins LAST',
              toll:'Some Of It You BUY', ceil:"There's a Gutter UP There",
              unseen:'The Wall Is Still There'};
+/* Per-WALL cards, for a wall whose lesson is about ITS OWN shape rather than
+   a feature it shares. Keyed on wall index; a feature card would be wrong here
+   because 'mix' now rides six walls and the warning belongs to exactly one.
+   Wall 1 (Scott, 2026-08-24): the ball really does leak through the segmented
+   floor's seams, and being told once beats discovering it as a betrayal. */
+const WALL_CARDS={0:'Mind The Gaps In The Steel'};
 /* THE UNSEEN — every brick starts at vis 0 and draws NOTHING. A strike pings
    a brief outline (the sonar's voice); a BREAK gives every brick within 2
    cells +1% visible, permanently. The literal 1% is Scott's spec: the wall
@@ -1751,6 +1777,7 @@ function lifeTick(){
 
 const FEATS={
   0:['mix'],             //  0 = THE CHIMNEY: cube-packed comb, 2026-08-23
+  1:['mix'],             //  1 = THE COOPERAGE: barrels on a rack, 2026-08-24
   2:['mix'],             //  2 = THE RIBS: remade in mixed masonry 2026-08-23
   3:['shelf','mix'],     //  3 = THE SHELF: cube dome over the steel, 2026-08-23
   4:['gall','mix'], 6:['egg'], 7:['rand'], 8:['stack'], 9:['grav'],
@@ -1832,6 +1859,7 @@ function loadLevel(n){
   if(!cw && n===LEVELS.length-1) featSet.add('boss');   // the LAST wall is his, whatever its number
   setMetrics(feat('fine'), feat('sqr'), feat('mix'));
   thumpMsg=''; for(const k in CARDS) if(feat(k)) thumpMsg=CARDS[k];
+  if(WALL_CARDS[n]) thumpMsg=WALL_CARDS[n];   // a wall's own card wins over a feature's
   thumpT = thumpMsg? THUMP_T : 0;      // a wall with a new rule introduces itself
   sinkT= feat('sink')? LURCH_MIN+Math.random()*LURCH_VAR : 0;
   /* teeters sit HIGH (Scott 2026-08-10): at 270 a downward ricochet left
@@ -1971,16 +1999,53 @@ function freeCell(cw,ch){
   return opts.length? opts[(Math.random()*opts.length)|0] : null;
 }
 /* ---- THE WALL MENU: navigation while it is up; the game is held ---- */
+/* ---------------- FAVOURITES + PLAY FAVORITES (Scott, 2026-08-24) ----------
+   "player can heart/unheart each wall, and there's a 'Play Favorites' button."
+   THE ONE RULE THAT MATTERS: hearts are keyed on the wall's NAME, never its
+   index. Indices move the moment a wall is inserted — and at 35 walls that
+   will happen again — which would silently re-point every heart at the wrong
+   wall. Names are unique and the naming law keeps them stable.
+   A favourites run is its own advance path: instead of level+1 it walks the
+   queue, so it visits exactly what was hearted, in wall order, and stops. */
+const FAV_KEY='sb_favs_v1';
+let favs={}, favQueue=null, favPos=0;
+function favLoad(){ try{ favs=JSON.parse(localStorage.getItem(FAV_KEY)||'{}')||{}; }catch(e){ favs={}; } }
+function favSave(){ try{ localStorage.setItem(FAV_KEY, JSON.stringify(favs)); }catch(e){} }
+function favName(i){ return WALL_NAMES[i] || ('WALL '+(i+1)); }
+function favHas(i){ return !!favs[favName(i)]; }
+function favToggle(i){
+  const k=favName(i);
+  if(favs[k]) delete favs[k]; else favs[k]=1;
+  favSave();
+}
+function favList(){ const out=[]; for(let i=0;i<LEVELS.length;i++) if(favHas(i)) out.push(i); return out; }
+function favStart(){
+  const q=favList();
+  if(!q.length) return false;
+  favQueue=q; favPos=0;
+  level=q[0]; loadLevel(level);
+  return true;
+}
+function favStop(){ favQueue=null; favPos=0; }
+
 function wallMenuInput(){
   const press=k=>{ const d=!!held[k], was=!!wmLatch[k]; wmLatch[k]=d; return d&&!was; };
   const n=LEVELS.length, HALF=Math.ceil(n/2);
+  if(press('h')||press('H')){ favToggle(wallSel); return; }
+  if(press('f')||press('F')){
+    if(favStart()){ wallUI=false; sfx.pick&&sfx.pick(); }
+    else if(typeof toast==='function') toast('Heart a wall first — H on any row.');
+    return;
+  }
   if(press('ArrowUp'))    wallSel=(wallSel+n-1)%n;
   if(press('ArrowDown'))  wallSel=(wallSel+1)%n;
   if(press('ArrowLeft')||press('ArrowRight'))
     wallSel= wallSel>=HALF? wallSel-HALF : Math.min(n-1, wallSel+HALF);
   if(press('Enter')){
     wallUI=false;
-    if(!ended && wallSel!==level){ level=wallSel; loadLevel(wallSel); sfx.pick&&sfx.pick(); }
+    /* picking a wall by hand leaves a favourites run — you have stepped off
+       the queue on purpose, and silently continuing it later would surprise */
+    if(!ended && wallSel!==level){ favStop(); level=wallSel; loadLevel(wallSel); sfx.pick&&sfx.pick(); }
     return;
   }
   /* eLatch: without it, the ESC that closed the menu is still held next
@@ -2015,11 +2080,19 @@ function drawWallMenu(){
     ctx.textAlign='left'; ctx.font='bold 12px '+FONT;
     ctx.fillStyle= i===level? '#7fe7ff' : i===wallSel? '#f2e2b8' : '#c2c8d8';
     ctx.fillText((WALL_NAMES[i]||('WALL '+(i+1))) + (i===level? '  ·  you are here':''), cx2-104, ry);
+    /* the heart rides the row it belongs to, on the far side of the name so
+       a long name never collides with it */
+    if(favHas(i)){
+      ctx.textAlign='left'; ctx.font='12px '+FONT; ctx.fillStyle='#e2607a';
+      ctx.fillText('♥', cx2+118, ry);
+    }
   }
   ctx.textAlign='center'; ctx.font='11px '+FONT; ctx.fillStyle='#9a8f7a';
-  ctx.fillText('ARROWS pick   ·   ENTER go   ·   ESC close', W/2, H-40);
+  ctx.fillText('ARROWS pick   ·   ENTER go   ·   H heart   ·   F play favourites   ·   ESC close', W/2, H-40);
   ctx.fillStyle='#6f7690';
-  ctx.fillText("(M is the valley's mute key — the murmuration answers here instead)", W/2, H-22);
+  const nf=favList().length;
+  ctx.fillText(nf? (nf+' hearted — F plays them in order')
+                 : "(M is the valley's mute key — the murmuration answers here instead)", W/2, H-22);
 }
 /* Where the slab actually IS this frame. Everything that touches the paddle —
    collision, catching pills, firing bolts, the death ray's muzzle, molten rock
@@ -2744,6 +2817,20 @@ function tick(){
        came from, which is what you want when you are iterating on one. */
     if(level<0){ sfx.win(); edLatch={}; openBuilder();
                  edit.msg='Cleared, in '+score+' points. Your wall works.'; return; }
+    /* A FAVOURITES RUN walks its own queue. It ENDS when the queue does —
+       a finite set of chosen walls that finishes is the whole point, and it
+       is also the honest reading of "play favorites": it is not the campaign. */
+    if(favQueue){
+      favPos++;
+      if(favPos<favQueue.length){
+        level=favQueue[favPos];
+        sfx.win(); loreWall=level; loreT=LORE_T; loreSkipLatch=true; loreLoad(level);
+      } else {
+        favStop();
+        sfx.win(); faceT=FACE_T; faceLoad();
+      }
+      return;
+    }
     level++;
     if(level>=LEVELS.length){ faceT=FACE_T; faceLoad(); }   // the OTHER FACE first; the win after
     else { sfx.win(); loreWall=level; loreT=LORE_T; loreSkipLatch=true; loreLoad(level); }
@@ -4283,7 +4370,12 @@ function drawHUD(){
   ctx.textAlign='left'; ctx.font='bold 13px '+FONT; ctx.fillStyle='#7fe7ff';
   ctx.fillText('SCORE '+score, 14, 20);
   ctx.fillStyle='#9aa4c0'; ctx.font='11px '+FONT;
-  ctx.fillText('WALL '+(Math.min(level,LEVELS.length-1)+1)+'/'+LEVELS.length, 14, 36);
+  const wn=Math.min(level,LEVELS.length-1);
+  /* the wall's NAME rides beside its number (Scott, 2026-08-24: "on
+     stonebreaker screens include wall name"). A custom wall has no name in
+     the table, so it says what it is instead of printing a wrong one. */
+  const wnm = level<0? 'YOUR WALL' : (WALL_NAMES[wn]||'');
+  ctx.fillText('WALL '+(wn+1)+'/'+LEVELS.length+(wnm? '  ·  '+wnm : ''), 14, 36);
   if(feat('toll')){                            // what you are holding, and can spend
     ctx.font='bold 12px '+FONT; ctx.fillStyle='#e8c15a';
     ctx.fillText('PURSE '+purse, 150, 20);
@@ -4984,7 +5076,15 @@ function bgSavePrefs(){
   catch(e){ if(bgUI) bgUI.msg='Too big to remember — it will last this session only.'; }
 }
 function bgKey(){ return level<0? 'custom' : String(level); }
-function bgEntry(){ return bgMap[bgKey()] || null; }
+/* THE HOUSE BACKGROUND (Scott, 2026-08-24: "a feature where they can choose 1
+   image as overall game background, local storage, stretches to fit").
+   Stored under the reserved key 'all' and used by EVERY wall that has not been
+   given one of its own — so one picture dresses the whole cabinet, and a wall
+   with a deliberate background still wins on its own row. Reserved-key note:
+   per-wall keys are numeric strings or 'custom', so 'all' can never collide. */
+const BG_ALL='all';
+function bgEntry(){ return bgMap[bgKey()] || bgMap[BG_ALL] || null; }
+function bgIsHouse(){ return !bgMap[bgKey()] && !!bgMap[BG_ALL]; }
 
 /* one Image per source, made once and reused. A broken link is remembered as
    broken so the game is not retrying a dead URL every frame. */
@@ -5032,6 +5132,11 @@ const BG_OPTS=[
   {k:'file', t:'Choose an image from this computer'},
   {k:'dim',  t:'Dim  (LEFT / RIGHT, or click the bar)'},
   {k:'off',  t:'Remove this wall’s background'},
+  /* the HOUSE background: set one picture once and every wall wears it.
+     Promote-what-you-see rather than a second picker — you have already
+     chosen the image on this wall, so the action is "use it everywhere". */
+  {k:'house',   t:'Use this picture on EVERY wall'},
+  {k:'nohouse', t:'Remove the every-wall picture'},
   {k:'all',  t:'Remove them from every wall'}
 ];
 function bgOpen(){
@@ -5068,6 +5173,18 @@ function bgDo(k){
   }
   else if(k==='file') bgFile();
   else if(k==='off'){ bgSet(null); bgUI.msg='Removed from this wall.'; }
+  else if(k==='house'){
+    const e=bgEntry();
+    if(!e || !e.src){ bgUI.msg='Pick a picture first, then send it to every wall.'; return; }
+    bgMap[BG_ALL]={src:e.src, dim:e.dim||BG_DIM_DEF};
+    delete bgMap[bgKey()];        // no duplicate copy on this wall's own row
+    bgSavePrefs();
+    bgUI.msg='Every wall wears it now. A wall given its own picture still wins.';
+  }
+  else if(k==='nohouse'){
+    if(!bgMap[BG_ALL]){ bgUI.msg='There is no every-wall picture set.'; return; }
+    delete bgMap[BG_ALL]; bgSavePrefs(); bgUI.msg='The every-wall picture is gone.';
+  }
   else if(k==='all'){ bgMap={}; bgSavePrefs(); bgUI.msg='Removed from every wall.'; }
 }
 function bgTick(){
@@ -5154,6 +5271,7 @@ window.BreakoutLayer={
     pad={x:W/2, w:PW0};
     spaceLatch=true; eLatch=true;
     bgLoadPrefs();
+    favLoad(); favStop();       // hearts persist; a favourites RUN never does
     loadLevel(0);
     helpUI=false;
     toast('STONEBREAKER. Where the ball meets the slab decides its angle. Press ? for the keys.');
