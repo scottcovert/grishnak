@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>CLEARANCE — gameplay wireframe</title>
+<style>
+  body{margin:0;background:#f2f0ec;color:#2b3238;font:14px/1.5 "Segoe UI",system-ui,sans-serif;
+    display:flex;flex-direction:column;align-items:center;padding:18px 10px;}
+  h1{font-size:17px;margin:0 0 2px;letter-spacing:.4px;}
+  .sub{color:#68737c;font-size:12.5px;margin-bottom:10px;}
+  canvas{background:#dfeef7;border:2px solid #7a858e;border-radius:6px;
+    image-rendering:pixelated;max-width:100%;}
+  .keys{margin-top:10px;font-size:12.5px;color:#4a545c;background:#fff;border:1px solid #d5d1c8;
+    border-radius:6px;padding:8px 14px;}
+  .keys b{color:#1e242a;}
+</style>
+</head>
+<body>
+<h1>CLEARANCE — gameplay wireframe</h1>
+<div class="sub">placeholder shapes only; layout, verbs and feel are the point. Not linked from anywhere.</div>
+<div style="position:relative;">
+<canvas id="cv" width="640" height="384" style="width:960px;max-width:100%;"></canvas>
+<button id="muteBtn" style="position:absolute;top:8px;right:8px;background:#fff;border:1px solid #c5bfb4;
+  border-radius:6px;padding:4px 10px;font:12px 'Segoe UI',sans-serif;color:#3a4249;cursor:pointer;">&#128266; sound on</button>
+</div>
+<div class="keys"><b>HOLD RIGHT or UP</b> throttle (momentum) &nbsp;•&nbsp; <b>HOLD LEFT or DOWN</b> back up slowly (beeper)
+  &nbsp;•&nbsp; <b>SPACE</b> cutter clutch &nbsp;•&nbsp; <b>H</b> honk &nbsp;•&nbsp; <b>L</b> labels &nbsp;•&nbsp; <b>V</b> flat / 3-4 skew</div>
+<script>
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const RW=640, RH=384, SW=300;            // SW = sidewalk surface y
+const FT=9, LASER=SW-Math.round(6.42*FT); // the 6'5" line: y=242
+const HUBX=195;                           // cutter hub screen x
+let held={}, labels=true, skew=false;
+addEventListener('keydown',e=>{ if(['ArrowRight','ArrowUp','ArrowLeft','ArrowDown',' '].includes(e.key))e.preventDefault();
+  if(e.key===' '&&!held[' ']) clutch=!clutch;
+  if((e.key==='h'||e.key==='H')&&carStop) honk();
+  if(e.key==='l'||e.key==='L') labels=!labels;
+  if(e.key==='v'||e.key==='V') skew=!skew;
+  held[e.key]=true; });
+addEventListener('keyup',e=>held[e.key]=false);
+
+/* ---------------- the street (a 3600px loop) ---------------- */
+const LOOP=3600;
+function mkBranches(){
+  const B=[]; const tx=[420,760,1150,1420,1900,2300,2650,3050,3350];
+  for(const x of tx){
+    const n=2+((x*7)%3|0);
+    for(let i=0;i<n;i++)
+      B.push({tree:x, x:x-40+i*38+((x*13+i*29)%17), tipY:LASER+6+((x*11+i*53)%26), cut:false});
+  }
+  return B;
+}
+let branches=mkBranches();
+const birdhouse={x:1930, waitT:0, gone:false};          // hangs on a 1900-tree branch
+const phone={x0:2540, x1:2790, sagY:LASER-4};           // sagging line near cutter height
+const car={x:3180, out:22, retreat:0};                  // parked nose-into-the-sidewalk
+const scottHouse={x:1150};                              // the already-perfect yard
+const walkers=[
+  {x:900,  spd:.32, h:52, kind:'ped',  lane:'far',  oops:0},
+  {x:1700, spd:.26, h:52, kind:'dog',  lane:'near', oops:0},
+  {x:2450, spd:.30, h:59, kind:'tall', lane:'far',  oops:0},
+  {x:3300, spd:.24, h:50, kind:'stroller', lane:'near', oops:0}
+];
+
+/* ---------------- machine state ---------------- */
+let worldX=0, v=0, clutch=false, spin=0, carStop=false;
+let cuts=0, passed=0, streak=0, incidents=0, whistleT=0, clockMin=8*60+30, clockAcc=0;
+let fallers=[], hatT=0, honkT=0, puffs=[], AC=null, beepT=0;
+function honk(){ honkT=40; car.retreat=1; }
+let MUTED=localStorage.getItem('wf-mute')==='1';
+const muteBtn=document.getElementById('muteBtn');
+function muteLabel(){ muteBtn.innerHTML=MUTED?'&#128263; muted':'&#128266; sound on'; }
+muteBtn.onclick=()=>{ MUTED=!MUTED; localStorage.setItem('wf-mute',MUTED?'1':'0'); muteLabel(); };
+muteLabel();
+function beep(){ if(MUTED)return; if(!AC)try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){return;}
+  const o=AC.createOscillator(), ga=AC.createGain();
+  o.type='square'; o.frequency.value=1000;
+  ga.gain.setValueAtTime(0.055,AC.currentTime);
+  ga.gain.exponentialRampToValueAtTime(0.001,AC.currentTime+0.12);
+  o.connect(ga); ga.connect(AC.destination); o.start(); o.stop(AC.currentTime+0.13); }
+
+function incident(msg){ incidents++; streak=0; whistleT=90; whistleMsg=msg; v=0; }
+let whistleMsg='';
+
+function update(){
+  const thr=held.ArrowRight||held.ArrowUp, rev=held.ArrowLeft||held.ArrowDown;
+  if(thr&&!rev) v=Math.min(2.4,v+0.03);
+  else if(rev&&!thr) v=Math.max(-0.7,v-0.02);          // backing up is SLOW, that's the joke
+  else v*=0.975;
+  if(Math.abs(v)<0.02)v=0;
+  if(carStop&&v>0)v=0;                                  // the car blocks forward only — reverse out
+  if(v<-0.05){ if(--beepT<=0){ beepT=26; beep(); } } else beepT=0;
+  worldX=(worldX+v+LOOP)%LOOP;
+  /* exhaust: tiny puffs out the back, rate follows effort */
+  if(Math.abs(v)>0.1 && Math.random()<0.12+Math.abs(v)*0.1)
+    puffs.push({x:62+Math.random()*4, y:SW-56, vx:-0.5-Math.abs(v)*0.25, vy:-0.5-Math.random()*0.3, r:1.8, a:0.45});
+  for(const p of puffs){ p.x+=p.vx; p.y+=p.vy; p.r+=0.09; p.a-=0.011; }
+  puffs=puffs.filter(p=>p.a>0);
+  spin+= (clutch?0.08:-0.06); spin=Math.max(0,Math.min(1,spin));
+  clockAcc+=v; if(clockAcc>140){ clockAcc=0; clockMin++; }
+  if(honkT>0)honkT--;
+  if(whistleT>0)whistleT--;
+  if(hatT>0)hatT--;
+
+  const sx=x=>{ let d=(x-worldX+LOOP)%LOOP; if(d>LOOP/2)d-=LOOP; return HUBX+d; };
+
+  /* branches meet the blades */
+  for(const b of branches){
+    const bx=sx(b.x);
+    if(!b.cut && Math.abs(bx-HUBX)<8){
+      if(spin>0.8){ b.cut=true; cuts++; streak++; fallers.push({x:bx,y:LASER,len:b.tipY-LASER,r:0,vy:0}); }
+      else if(bx<HUBX-4 && !b.missed){ b.missed=true; passed++; }
+    }
+  }
+  for(const f of fallers){ f.vy+=0.25; f.y+=f.vy; f.r+=0.09; }
+  fallers=fallers.filter(f=>f.y<SW+30);
+
+  /* people under the blades */
+  for(const w of walkers){
+    w.x=(w.x-w.spd+LOOP)%LOOP;
+    const wx=sx(w.x);
+    if(Math.abs(wx-HUBX)<26 && spin>0.15 && w.oops<=0){ w.oops=200; incident('BLADES OVER A '+(w.kind==='dog'?'DOG':'PEDESTRIAN')+' — STOP THE BLADES, NOT THE WHEELS'); }
+    if(w.oops>0)w.oops--;
+  }
+
+  /* birdhouse: blades near it = incident; waiting with blades off frees it */
+  if(!birdhouse.gone){
+    const bx=sx(birdhouse.x);
+    if(Math.abs(bx-HUBX)<26){
+      if(spin>0.15){ if(!birdhouse.oops){ birdhouse.oops=true; incident('THAT IS A BIRDHOUSE'); } }
+      else { birdhouse.waitT++; if(birdhouse.waitT>110) birdhouse.gone=true; }
+    } else birdhouse.oops=false;
+  }
+  /* phone line: spinning through it = incident */
+  const p0=sx(phone.x0), p1=sx(phone.x1);
+  if(p0<HUBX+20 && p1>HUBX-20 && spin>0.8 && !phone.oops){ phone.oops=true; incident('THE PHONE LINE IS NOT A BRANCH'); }
+  if(p1<HUBX-30||p0>HUBX+30) phone.oops=false;
+
+  /* the nose-in car */
+  const cx=sx(car.x);
+  if(car.retreat>0){ car.out=Math.max(0,car.out-0.4); if(car.out===0)car.retreat=0; }
+  carStop = car.out>4 && cx>HUBX+18 && cx<HUBX+70;
+  if(carStop&&v>0) v=0;
+
+  /* the hat-tip house */
+  const hx=sx(scottHouse.x);
+  if(Math.abs(hx-HUBX)<10 && v>0.2 && hatT===0) hatT=120;
+}
+
+/* ---------------- draw ---------------- */
+function line(a,b,c,d){ g.beginPath(); g.moveTo(a,b); g.lineTo(c,d); g.stroke(); }
+function label(txt,x,y,tx,ty){
+  if(!labels)return;
+  g.strokeStyle='#8a939b'; g.lineWidth=1; line(x,y,tx,ty);
+  g.font='10px Segoe UI'; const w=g.measureText(txt).width+8;
+  g.fillStyle='#ffffff'; g.strokeStyle='#b9b3a8';
+  g.fillRect(tx-4,ty-11,w,15); g.strokeRect(tx-4,ty-11,w,15);
+  g.fillStyle='#3a4249'; g.fillText(txt,tx,ty);
+}
+function draw(){
+  const sx=x=>{ let d=(x-worldX+LOOP)%LOOP; if(d>LOOP/2)d-=LOOP; return HUBX+d; };
+  /* houses scroll slower and the road faster only in SKEW — the parallax IS the depth */
+  const hsx=x=>{ if(!skew)return sx(x); let d=(x-worldX*0.75+LOOP)%LOOP; if(d>LOOP/2)d-=LOOP; return HUBX+d; };
+  g.fillStyle='#dfeef7'; g.fillRect(0,0,RW,RH);                       // sky
+  g.fillStyle='#dbe6d2'; g.fillRect(0,skew?SW-120:SW-72,RW,skew?120:72); // lawns band
+  g.fillStyle='#d7d3c9'; g.fillRect(0,skew?SW-14:SW,RW,skew?34:20);   // sidewalk slab
+  g.strokeStyle='#b9b5ab';
+  for(let i=0;i<9;i++){ const jx=(80*i - worldX%80+RW)%RW;
+    if(skew) line(jx+10,SW-14,jx,SW+20); else line(jx,SW,jx,SW+20); } // slanted joints in skew
+  g.fillStyle='#a7abb0'; g.fillRect(0,SW+20,RW,RH-SW-20);             // road
+  g.strokeStyle='#e6e8ea'; g.setLineDash([14,18]);
+  const roadShift=skew?(worldX*1.25)%32:0;
+  line(-roadShift,SW+48,RW,SW+48); g.setLineDash([]);
+  if(skew){ g.strokeStyle='#8f949a'; line(0,SW+20,RW,SW+20);          // curb edge
+    g.setLineDash([26,22]); g.strokeStyle='#f0f2f4'; g.lineWidth=3;
+    g.beginPath(); g.moveTo(RW-((worldX*1.25)%48),SW+66); g.lineTo(-48,SW+66); g.stroke();
+    g.setLineDash([]); g.lineWidth=1.5; }
+
+  /* houses + trees + obstacles (world layer) */
+  g.lineWidth=1.5;
+  for(const x of [260,760,1150,1620,2100,2540,3050,3400]){
+    const hx=hsx(x), hb=skew?SW-34:SW, sc=skew?0.82:1;
+    g.save(); g.translate(hx,hb); g.scale(sc,sc);
+    g.fillStyle='#efece4'; g.strokeStyle='#9aa4ad';
+    g.fillRect(-58,-64,86,58); g.strokeRect(-58,-64,86,58);
+    g.beginPath(); g.moveTo(-64,-64); g.lineTo(-15,-88); g.lineTo(34,-64); g.closePath();
+    g.fillStyle='#e3ded2'; g.fill(); g.stroke();
+    if(skew){ g.fillStyle='#dfd9cb';                                   // roof face = the 3/4 read
+      g.beginPath(); g.moveTo(-64,-64); g.lineTo(-15,-88); g.lineTo(1,-84); g.lineTo(-48,-60); g.closePath(); g.fill(); g.stroke(); }
+    g.restore();
+  }
+  for(const b of branches){
+    const tx=sx(b.tree), bx=sx(b.x);
+    g.strokeStyle='#7d7466'; g.lineWidth=5; line(tx,SW,tx,150);       // trunk
+    g.lineWidth=1.5; g.strokeStyle='#8fae84'; g.fillStyle='#c9dabe';
+    g.beginPath(); g.arc(tx,140,42,0,7); g.fill(); g.stroke();        // canopy
+    const tip=b.cut?LASER:b.tipY;
+    g.strokeStyle=b.cut?'#8fae84':'#6f8f63'; g.lineWidth=3;
+    g.beginPath(); g.moveTo(bx,148); g.quadraticCurveTo(bx+4,(148+tip)/2,bx,tip); g.stroke();
+    if(!b.cut){ g.fillStyle='#9dbb90'; g.beginPath(); g.arc(bx,tip,7,0,7); g.fill(); }
+  }
+  for(const f of fallers){ g.save(); g.translate(f.x,f.y); g.rotate(f.r);
+    g.strokeStyle='#6f8f63'; g.lineWidth=3; line(-2,-f.len/2,2,f.len/2); g.restore(); }
+
+  if(!birdhouse.gone){ const bx=sx(birdhouse.x);
+    g.fillStyle='#c9a06a'; g.strokeStyle='#7d6a4a';
+    g.fillRect(bx-7,LASER+8,14,14); g.strokeRect(bx-7,LASER+8,14,14);
+    g.fillStyle='#3a4249'; g.beginPath(); g.arc(bx,LASER+14,2.4,0,7); g.fill();
+    label('birdhouse: blades OFF, wait, bird relocates',bx,LASER+10,bx+40,LASER-40);
+  }
+  { const p0=sx(phone.x0), p1=sx(phone.x1);                            // phone line + poles
+    g.strokeStyle='#7d7466'; g.lineWidth=4; line(p0,SW,p0,170); line(p1,SW,p1,170);
+    g.strokeStyle='#555c62'; g.lineWidth=1.6;
+    g.beginPath(); g.moveTo(p0,176); g.quadraticCurveTo((p0+p1)/2,phone.sagY+26,p1,176); g.stroke();
+    label('sagging phone line: NOT a branch',(p0+p1)/2,phone.sagY+16,(p0+p1)/2-30,phone.sagY-34);
+  }
+  { const cx=sx(car.x);                                                // nose-in car
+    g.fillStyle='#cdd4da'; g.strokeStyle='#6d777f'; g.lineWidth=1.5;
+    g.fillRect(cx,SW-20-car.out*0,60,0);
+    g.save(); g.translate(cx,SW-2);
+    g.fillRect(-6,-16,34+car.out,16); g.strokeRect(-6,-16,34+car.out,16);
+    g.beginPath(); g.arc(4,0,5,0,7); g.arc(22+car.out,0,5,0,7); g.fillStyle='#4a545c'; g.fill();
+    g.restore();
+    if(car.out>4) label('parked nose-in: brake and HONK (H), owner ambles out',cx+14,SW-18,cx-10,SW-64);
+  }
+  { const hx=sx(scottHouse.x);                                         // the perfect yard
+    if(labels) label('this tree is already perfect (the operator tips his hat)',hx,150,hx-60,120);
+    if(hatT>0){ g.fillStyle='#3a4249'; g.font='11px Segoe UI'; g.fillText('*tips hat*',HUBX-70,SW-96); }
+  }
+
+  /* walkers — in SKEW the near lane passes IN FRONT of the machine */
+  function drawWalker(w){
+    const wx=sx(w.x); if(wx<-30||wx>RW+30)return;
+    const near=skew&&w.lane==='near', far=skew&&w.lane==='far';
+    const surf=near?SW+16:(far?SW-8:SW), sc=near?1.08:(far?0.85:1);
+    const duck=(w.kind==='tall'&&Math.abs(wx-HUBX)<40)?10:0;
+    g.save(); g.translate(wx,surf); g.scale(sc,sc); g.translate(-wx,-surf);
+    const h=w.h-duck, hy=surf-h;
+    g.strokeStyle=w.oops>0?'#c0392b':'#4a545c'; g.lineWidth=2;
+    g.beginPath(); g.arc(wx,hy+6,6,0,7); g.stroke();                  // head
+    line(wx,hy+12,wx,surf-12); line(wx,surf-12,wx-6,surf); line(wx,surf-12,wx+6,surf);
+    line(wx,hy+20,wx-7,hy+30); line(wx,hy+20,wx+7,hy+30);
+    if(w.kind==='dog'){ const dx=wx-26;
+      g.strokeStyle='#6d5c49'; line(wx+2,hy+24,dx,surf-8);            // leash
+      g.fillStyle='#8a7355'; g.fillRect(dx-10,surf-10,18,7);
+      g.beginPath(); g.arc(dx-12,surf-9,4,0,7); g.fill(); }
+    if(w.kind==='stroller'){ const px=wx-20;
+      g.strokeStyle='#4a545c'; g.strokeRect(px-12,surf-22,20,12);
+      g.beginPath(); g.arc(px-10,surf-4,4,0,7); g.arc(px+6,surf-4,4,0,7); g.stroke(); }
+    g.restore();
+    if(w.kind==='tall'&&duck) label('the one 6ft 6in man in town, ducking forever',wx,hy,wx+26,hy-24);
+  }
+  for(const w of walkers) if(!(skew&&w.lane==='near')) drawWalker(w);
+
+  /* the 6'5" laser line */
+  g.strokeStyle='rgba(220,60,60,.55)'; g.lineWidth=1.4; g.setLineDash([7,7]);
+  line(HUBX+30,LASER,RW,LASER); g.setLineDash([]);
+  label('the 6ft 5in clearance line (laser level)',RW-120,LASER,RW-190,LASER-26);
+
+  /* ---------------- the machine ---------------- */
+  /* cartoony trundle: slight horizontal-then-vertical squash + a small bounce,
+     amplitude follows speed so a parked machine sits still. Visual only —
+     cut math never moves. */
+  const sq=Math.min(1,Math.abs(v)/2.4), ph=performance.now()/150;
+  const sxq=1-0.022*sq*Math.max(0,Math.sin(ph));
+  const syq=1-0.022*sq*Math.max(0,-Math.sin(ph));
+  g.save();
+  g.translate(130,SW); g.scale(sxq,syq); g.translate(-130,-SW);
+  g.translate(0,-1.6*sq*Math.abs(Math.sin(ph*1.35)));
+  g.lineWidth=1.6;
+  g.fillStyle='#c8d2da'; g.strokeStyle='#4a545c';
+  g.fillRect(58,SW-46,120,46); g.strokeRect(58,SW-46,120,46);          // body
+  g.fillRect(70,SW-78,58,32);  g.strokeRect(70,SW-78,58,32);           // cab
+  g.fillStyle='#e8f2f8'; g.fillRect(76,SW-72,46,20); g.strokeRect(76,SW-72,46,20); // window
+  g.fillStyle='#f2b73c';                                               // beacon
+  g.fillRect(94,SW-84,10,6); g.strokeRect(94,SW-84,10,6);
+  g.fillStyle='#c8d2da';
+  g.fillRect(178,SW-34,22,34); g.strokeRect(178,SW-34,22,34);          // nose
+  for(const wx of [86,150]){ g.fillStyle='#5a646c';                    // wheels
+    g.beginPath(); g.arc(wx,SW-13,13,0,7); g.fill();
+    g.fillStyle='#aab4bc'; g.beginPath(); g.arc(wx,SW-13,5,0,7); g.fill(); }
+  g.fillStyle='#e3574b';                                               // COMICALLY OVERSIZED BUMPER
+  g.fillRect(198,SW-30,16,30); g.strokeRect(198,SW-30,16,30);
+  g.fillStyle='#fff'; for(let i=0;i<3;i++) g.fillRect(200,SW-26+i*10,12,4);
+  g.strokeStyle='#4a545c'; g.lineWidth=4; line(186,SW-34,HUBX,LASER+8); // mast
+  g.save(); g.translate(HUBX,LASER);                                    // the cutter hub
+  g.rotate(performance.now()/1000*spin*14);
+  g.strokeStyle=spin>0.8?'#c0392b':'#6d777f'; g.lineWidth=3;
+  for(let i=0;i<3;i++){ g.rotate(Math.PI*2/3); line(0,0,22,0); g.beginPath(); g.arc(22,0,4,0,7); g.stroke(); }
+  g.restore();
+  g.fillStyle='#3a4249'; g.beginPath(); g.arc(HUBX,LASER,5,0,7); g.fill();
+  if(skew){ g.fillStyle='#dbe3ea'; g.strokeStyle='#4a545c'; g.lineWidth=1.6;   // roof faces = 3/4 read
+    g.beginPath(); g.moveTo(58,SW-46); g.lineTo(70,SW-54); g.lineTo(190,SW-54); g.lineTo(178,SW-46); g.closePath(); g.fill(); g.stroke();
+    g.beginPath(); g.moveTo(70,SW-78); g.lineTo(80,SW-85); g.lineTo(138,SW-85); g.lineTo(128,SW-78); g.closePath(); g.fill(); g.stroke(); }
+  g.fillStyle='#5a646c'; g.fillRect(62,SW-56,6,10);                    // exhaust stub
+  if(v<-0.05){ g.fillStyle='#fff'; g.fillRect(56,SW-26,4,7);           // reverse lamp
+    g.strokeStyle='#c9c4ba'; g.strokeRect(56,SW-26,4,7);
+    if(beepT>16){ g.fillStyle='#3a4249'; g.font='10px Segoe UI'; g.fillText('beep',40,SW-34); } }
+  g.restore();                                                          // end trundle squash
+  for(const p of puffs){ g.fillStyle='rgba(120,128,134,'+p.a+')';       // exhaust puffs
+    g.beginPath(); g.arc(p.x,p.y,p.r,0,7); g.fill(); }
+  label('cutter mechanism: PLACEHOLDER (the funny art is the star, later)',HUBX,LASER-6,40,LASER-52);
+  label('comically oversized emergency bumper',206,SW-16,250,SW+52);
+  if(honkT>0){ g.fillStyle='#3a4249'; g.font='bold 13px Segoe UI'; g.fillText('HOOOONK',HUBX+20,SW-70); }
+  for(const w of walkers) if(skew&&w.lane==='near') drawWalker(w);    // the depth moment
+
+  /* HUD strip */
+  g.fillStyle='rgba(255,255,255,.92)'; g.fillRect(0,0,RW,24);
+  g.strokeStyle='#c9c4ba'; line(0,24,RW,24);
+  const hh=Math.floor(clockMin/60), mm=String(clockMin%60).padStart(2,'0');
+  const even=passed+cuts?Math.round(cuts/(cuts+passed)*100):100;
+  g.fillStyle='#2b3238'; g.font='11.5px Consolas,monospace';
+  g.fillText('SCHEDULE '+hh+':'+mm+' AM',10,16);
+  g.fillText('LINE '+even+'%',150,16);
+  g.fillText('STREAK '+streak,240,16);
+  g.fillText('INCIDENTS '+incidents,330,16);
+  g.fillText('BLADES '+(spin>0.8?'CUTTING':spin>0.15?(clutch?'SPINNING UP':'WINDING DOWN'):'OFF'),440,16);
+  g.fillText('V: '+(skew?'3/4 SKEW':'FLAT'),578,16);
+
+  if(whistleT>0){ g.fillStyle='rgba(192,57,43,'+Math.min(.85,whistleT/40)+')';
+    g.fillRect(0,150,RW,54); g.fillStyle='#fff'; g.font='bold 18px Segoe UI';
+    g.fillText('TWEEEET!  '+whistleMsg,24,178); g.font='11px Segoe UI';
+    g.fillText('auto-stop. the inspector is writing something down.',24,194); }
+  if(carStop && car.out>4){ g.fillStyle='#2b3238'; g.font='bold 13px Segoe UI';
+    g.fillText('Press H to honk',HUBX+40,SW-56); }
+}
+function frame(){ update(); draw(); requestAnimationFrame(frame); }
+frame();
+</script>
+</body>
+</html>

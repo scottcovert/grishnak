@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>THE BULLRING — wireframe v3, cozy art pass</title>
+<style>
+  body{margin:0;background:#f6efe2;color:#2b3238;font:14px/1.5 "Segoe UI",system-ui,sans-serif;
+    display:flex;flex-direction:column;align-items:center;padding:16px 10px;}
+  h1{font-size:17px;margin:0 0 2px;letter-spacing:.4px;}
+  .sub{color:#68737c;font-size:12.5px;margin-bottom:10px;max-width:1088px;text-align:center;}
+  canvas{background:#bfe3ef;border:2px solid #b08a5e;border-radius:8px;max-width:100%;}
+  .keys{margin-top:10px;font-size:12.5px;color:#4a545c;background:#fff;border:1px solid #e0d5bd;
+    border-radius:6px;padding:8px 14px;max-width:1088px;text-align:center;}
+  .keys b{color:#1e242a;}
+</style>
+</head>
+<body>
+<h1>THE BULLRING — wireframe v6, phase 1 fights back</h1>
+<div class="sub">No more brute force: matadors are only shovable mid-cape-wave and shove YOU back when alert,
+clowns run interference on the trust play (HONK!), and an untrusting bull at speed bowls you over. All Scott's cells. <b>L</b> labels.</div>
+<div style="position:relative;">
+<canvas id="cv" width="1088" height="768"></canvas>
+<button id="muteBtn" style="position:absolute;top:8px;right:8px;background:#fff;border:1px solid #c5bfb4;
+  border-radius:6px;padding:4px 10px;font:12px 'Segoe UI',sans-serif;color:#3a4249;cursor:pointer;">&#128266; sound on</button>
+</div>
+<div class="keys"><b>ARROWS</b> move, 8 directions &nbsp;&bull;&nbsp; <b>SPACE</b> shove a matador — <b>only while his cape is out</b>; alert ones shove YOU
+  &nbsp;&bull;&nbsp; <b>hold still near the bull</b> trust up — but clowns run interference (SPACE sends them off)
+  &nbsp;&bull;&nbsp; <b>SPACE beside him at full trust</b> mount &nbsp;&bull;&nbsp; mounted: <b>ARROWS</b> run &nbsp;&bull;&nbsp; <b>L</b> labels</div>
+<script>
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const W=680, H=480, CXA=340, CYA=260, RAD=200;
+const ZOOM=1.6;                                  // render scale; ALL logic stays in 680x480 coords
+const SQ=0.55;                                   // the bowl squash: the perspective
+let held={}, labels=true, AC=null;
+addEventListener('keydown',e=>{ if(e.key.startsWith('Arrow')||e.key===' ')e.preventDefault();
+  if(e.key==='l'||e.key==='L')labels=!labels; held[e.key]=true; });
+addEventListener('keyup',e=>held[e.key]=false);
+let MUTED=localStorage.getItem('wf-mute')==='1';
+const muteBtn=document.getElementById('muteBtn');
+function muteLabel(){ muteBtn.innerHTML=MUTED?'&#128263; muted':'&#128266; sound on'; }
+muteBtn.onclick=()=>{ MUTED=!MUTED; localStorage.setItem('wf-mute',MUTED?'1':'0'); muteLabel(); };
+muteLabel();
+function tone(f0,f1,dur,type,vol){ if(MUTED)return; try{
+  if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();
+  const o=AC.createOscillator(), ga=AC.createGain();
+  o.type=type||'square'; o.frequency.setValueAtTime(f0,AC.currentTime);
+  o.frequency.exponentialRampToValueAtTime(Math.max(40,f1),AC.currentTime+dur);
+  ga.gain.setValueAtTime(vol||0.05,AC.currentTime);
+  ga.gain.exponentialRampToValueAtTime(0.001,AC.currentTime+dur);
+  o.connect(ga); ga.connect(AC.destination); o.start(); o.stop(AC.currentTime+dur+0.02);
+}catch(e){} }
+const scream=()=>{ tone(900,180,0.55,'sawtooth',0.07); tone(1300,240,0.5,'square',0.03); };
+const yipe  =()=>{ tone(500,1400,0.18,'square',0.05); };
+const oof   =()=>{ tone(220,90,0.16,'sawtooth',0.07); };
+const hoof  =()=>{ tone(120,60,0.09,'sine',0.09); };
+const snort =()=>{ tone(90,55,0.22,'sawtooth',0.06); };
+
+/* logic runs on a true circle; only the DRAW squashes it into a bowl */
+const proj=(x,y)=>{ const k=(y-CYA)/RAD;         // -1 back … +1 front
+  return { x:CXA+(x-CXA), y:CYA+(y-CYA)*SQ, s:0.76+0.24*Math.max(-1,Math.min(1,k)) }; };
+
+/* ---------------- cast ---------------- */
+const P={x:CXA, y:CYA+150, vx:0, vy:0, mounted:false, downT:0, invT:0};
+const BULL={x:CXA, y:CYA-60, a:Math.PI/2, v:0, hoofT:0};
+let trust=12;
+const GATE={a:-Math.PI/2};                        // the back arch
+let mats=[
+  {a:0.4,  d:120, waveT:0, downT:0, flung:0, fx:0,fy:0,fvx:0,fvy:0,spin:0},
+  {a:2.5,  d:110, waveT:30, downT:0, flung:0, fx:0,fy:0,fvx:0,fvy:0,spin:0},
+  {a:4.4,  d:130, waveT:60, downT:0, flung:0, fx:0,fy:0,fvx:0,fvy:0,spin:0}
+];
+const mpos=m=>({x:CXA+Math.cos(m.a)*m.d, y:CYA+Math.sin(m.a)*m.d});
+const barrels=[{x:CXA-120,y:CYA+70,vx:0,vy:0},{x:CXA+130,y:CYA+40,vx:0,vy:0}];
+const clowns=[{x:CXA-90,y:CYA+110,hid:-1,fleeT:0},{x:CXA+100,y:CYA+95,hid:-1,fleeT:0}];
+/* the stretcher crew — Raging Beast (1985) steal: they whizz out at speed, and here
+   they are always slightly too late, which is the joke */
+const crew={st:'idle', x:0, y:0, t:0, tgt:null, fx:1};
+const crewHome=()=>({x:CXA+Math.cos(GATE.a)*(RAD-16), y:CYA+Math.sin(GATE.a)*(RAD-16)});
+/* THE BULL HIMSELF — Scott's sprite cells (bullfight-charactersheet, keyed + packed) */
+const BIMG=new Image(); BIMG.src='images/bull-cells.png?v=2026082203';
+const BCELLS={"idle":{"x":2,"y":67,"w":127,"h":91},"trotA":{"x":131,"y":67,"w":131,"h":91},"trotB":{"x":264,"y":67,"w":132,"h":91},"chargeA":{"x":398,"y":70,"w":136,"h":88},"chargeB":{"x":536,"y":70,"w":140,"h":88},"rear":{"x":678,"y":2,"w":115,"h":156},"calm":{"x":795,"y":73,"w":134,"h":85},"sit":{"x":931,"y":18,"w":133,"h":140},"twdChgA":{"x":1066,"y":76,"w":133,"h":82},"twdChgB":{"x":1201,"y":70,"w":136,"h":88},"awTrotA":{"x":1339,"y":54,"w":118,"h":104},"awTrotB":{"x":1459,"y":39,"w":119,"h":119},"awChgA":{"x":1580,"y":66,"w":124,"h":92},"awChgB":{"x":1706,"y":44,"w":128,"h":114},"twdTrotA":{"x":1836,"y":66,"w":124,"h":92},"twdTrotB":{"x":1962,"y":67,"w":131,"h":91}};
+let satM=null, satT=0, rearT=0;                   // the revenge sit + the mount rear
+/* THE MAN — Scott's hero cells (bullhero.jpg, keyed + packed) */
+const HIMG=new Image(); HIMG.src='images/hero-cells.png?v=2026082201';
+const HCELLS={"idle":{"x":2,"y":2,"w":52,"h":148},"walkA":{"x":56,"y":2,"w":70,"h":148},"walkB":{"x":128,"y":2,"w":71,"h":148},"calm":{"x":201,"y":2,"w":65,"h":148},"shove":{"x":268,"y":9,"w":109,"h":141},"ride1":{"x":379,"y":20,"w":76,"h":130},"ride2":{"x":457,"y":12,"w":91,"h":138},"hop":{"x":550,"y":19,"w":70,"h":131}};
+let pface=1, shoveT=0;
+/* THE SUPPORTING CAST — matador + clown/barrel sheets (violet clown recolored at pack time) */
+const MIMG=new Image(); MIMG.src='images/matador-cells.png?v=2026082201';
+const MCELLS={"stand":{"x":2,"y":2,"w":71,"h":138},"capeA":{"x":75,"y":10,"w":113,"h":130},"capeB":{"x":190,"y":10,"w":112,"h":130},"down":{"x":304,"y":14,"w":112,"h":126},"fly":{"x":418,"y":31,"w":131,"h":109},"runA":{"x":551,"y":25,"w":106,"h":115},"runB":{"x":659,"y":26,"w":108,"h":114},"flat":{"x":769,"y":55,"w":140,"h":85}};
+const CIMG=new Image(); CIMG.src='images/clown-cells.png?v=2026082201';
+const KIMG=new Image(); KIMG.src='images/crew-cells.png?v=2026082201';
+const KCELLS={"stand":{"x":2,"y":2,"w":123,"h":100},"runA":{"x":127,"y":11,"w":128,"h":91},"runB":{"x":257,"y":11,"w":128,"h":91},"shrug":{"x":387,"y":3,"w":140,"h":99},"kneel":{"x":529,"y":30,"w":139,"h":72},"carryStand":{"x":670,"y":3,"w":125,"h":99},"carryA":{"x":797,"y":13,"w":134,"h":89},"carryB":{"x":933,"y":14,"w":133,"h":88}};
+const CCELLS={"stand":{"x":2,"y":5,"w":55,"h":121},"runA":{"x":59,"y":7,"w":87,"h":119},"runB":{"x":148,"y":7,"w":88,"h":119},"dive":{"x":238,"y":24,"w":112,"h":102},"keg":{"x":352,"y":33,"w":80,"h":93},"rollA":{"x":434,"y":26,"w":96,"h":100},"rollB":{"x":532,"y":26,"w":96,"h":100},"peek":{"x":630,"y":2,"w":80,"h":124},"stand2":{"x":712,"y":5,"w":55,"h":121},"runA2":{"x":769,"y":7,"w":87,"h":119},"runB2":{"x":858,"y":7,"w":88,"h":119},"dive2":{"x":948,"y":24,"w":112,"h":102},"peek2":{"x":1062,"y":2,"w":80,"h":124}};
+let puffs=[];                                     // hoof dust
+let frame=0, silence=false, silenceT=0, msg='', msgT=0, spaceLatch=true;
+function say(m){ msg=m; msgT=150; }
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+function clampRing(o,r){ const d=Math.hypot(o.x-CXA,o.y-CYA);
+  if(d>RAD-r){ const k=(RAD-r)/d; o.x=CXA+(o.x-CXA)*k; o.y=CYA+(o.y-CYA)*k; return true; }
+  return false; }
+
+/* ---------------- update ---------------- */
+function update(){
+  frame++;
+  if(silence){ silenceT++; return; }
+  const active=mats.filter(m=>!m.flung);
+
+  if(!P.mounted){
+    if(P.downT>0){                                /* you are in the sand */
+      P.downT--; if(P.downT===0) P.invT=60;
+      P.vx=0; P.vy=0;
+    } else {
+    if(P.invT>0)P.invT--;
+    /* plain 8-way movement, no momentum */
+    const ax=(held.ArrowRight?1:0)-(held.ArrowLeft?1:0);
+    const ay=(held.ArrowDown?1:0)-(held.ArrowUp?1:0);
+    const mv=Math.hypot(ax,ay);
+    P.vx= mv? ax/mv*2.2 : 0; P.vy= mv? ay/mv*2.2 : 0;
+    P.x+=P.vx; P.y+=P.vy; clampRing(P,10);
+    if(ax>0)pface=1; else if(ax<0)pface=-1;
+    const still=Math.hypot(P.vx,P.vy)<0.12;
+    /* TRUST, road one: the capybara lesson — unless a clown is in your face */
+    const heckled=clowns.some(c=>c.hid<0&&c.fleeT<=0&&dist(c,P)<26);
+    if(dist(P,BULL)<70 && still && !heckled) trust=Math.min(100,trust+0.16);
+    /* the capes work against you */
+    for(const m of active) if(m.downT===0 && m.waveT<30 && dist(mpos(m),BULL)<130)
+      trust=Math.max(0,trust-0.035);
+    if(held[' ']&&!spaceLatch){ spaceLatch=true;
+      const near=active.find(m=>m.downT===0 && dist(mpos(m),P)<24);
+      const nclown=clowns.find(c=>c.hid<0&&c.fleeT<=0&&dist(c,P)<20);
+      if(trust>=75 && dist(P,BULL)<36){
+        P.mounted=true; snort(); say('YOU ARE ON THE BULL. HE ALLOWS IT.');
+        rearT=45; if(satM){ satM.downT=40; satM=null; }
+      } else if(near){
+        /* TRUST, road two — but ONLY while his cape is out (hands full) */
+        if(near.waveT<30){
+          near.downT=170; trust=Math.min(100,trust+18); oof(); shoveT=20;
+          say(['ON HIS ASS. THE BULL SAW THAT.','ANOTHER ONE DOWN. THE BULL APPROVES.','HE FELT THAT ONE FROM THE SAND.'][Math.floor(Math.random()*3)]);
+        } else {                                  /* alert: he shoves FIRST */
+          P.downT=70; trust=Math.max(0,trust-6); oof(); near.checkT=15;
+          say('HE SAW YOU COMING. SHOVE THEM WHILE THE CAPE IS OUT.');
+        }
+      } else if(nclown){ nclown.fleeT=180; yipe();
+        say('THE CLOWN REMEMBERS AN APPOINTMENT ELSEWHERE.'); }
+    }
+    if(!held[' ']) spaceLatch=false;
+    }
+  } else {
+    /* mounted: same plain 8-way — hold a direction, the bull runs it. The havoc. */
+    const bax=(held.ArrowRight?1:0)-(held.ArrowLeft?1:0);
+    const bay=(held.ArrowDown?1:0)-(held.ArrowUp?1:0);
+    if(bax||bay){ BULL.a=Math.atan2(bay,bax); BULL.v=Math.min(4.6,BULL.v+0.5); }
+    else BULL.v*=0.8;
+    BULL.x+=Math.cos(BULL.a)*BULL.v; BULL.y+=Math.sin(BULL.a)*BULL.v;
+    if(clampRing(BULL,16) && BULL.v>1){ BULL.v*=0.8; }
+    P.x=BULL.x; P.y=BULL.y;
+    if(BULL.v>1.4){ if(--BULL.hoofT<=0){ BULL.hoofT=Math.max(5,14-BULL.v*1.6); hoof(); } }
+    for(const m of active){
+      const mp=mpos(m);
+      if(BULL.v>2.2 && Math.hypot(BULL.x-mp.x,BULL.y-mp.y)<24){
+        m.flung=1; m.fx=mp.x; m.fy=mp.y;
+        const th=Math.atan2(mp.y-CYA,mp.x-CXA);
+        m.fvx=Math.cos(th)*6+Math.cos(BULL.a)*3; m.fvy=Math.sin(th)*6+Math.sin(BULL.a)*3-3;
+        m.spin=0.3; scream(); BULL.v*=0.75;
+        say(['ONE FOR THE CHEAP SEATS','THE CROWD CATCHES HIM','HE FILES A COMPLAINT MID-AIR'][mats.filter(x=>x.flung).length-1]||'');
+      }
+    }
+    for(const b of barrels){
+      if(Math.hypot(BULL.x-b.x,BULL.y-b.y)<22 && BULL.v>1){
+        b.vx=Math.cos(BULL.a)*BULL.v*0.9; b.vy=Math.sin(BULL.a)*BULL.v*0.9; yipe();
+        const ci=clowns.findIndex(c=>c.hid===barrels.indexOf(b));
+        if(ci>=0){ clowns[ci].hid=-1; clowns[ci].fleeT=120; }
+      }
+      b.x+=b.vx; b.y+=b.vy; b.vx*=0.94; b.vy*=0.94; clampRing(b,10);
+    }
+    if(active.length===0){
+      const gx=CXA+Math.cos(GATE.a)*RAD, gy=CYA+Math.sin(GATE.a)*RAD;
+      if(Math.hypot(BULL.x-gx,BULL.y-gy)<32){ silence=true; }
+    }
+  }
+
+  /* the bull on his own, phase 1: charges waving capes — or sits on a downed man */
+  if(!P.mounted){
+    for(const m of active) if(m.downT===0) m.waveT=(m.waveT+1)%90;
+    if(satM){                                     /* the revenge sit: he is busy */
+      BULL.v=0; satT++;
+      if(satT>240){ satM.downT=30; satM=null; }
+    } else {
+      let sitTgt=null;
+      for(const m of active) if(m.downT>40 && !m._sat){ const sp=mpos(m);
+        if(Math.hypot(BULL.x-sp.x,BULL.y-sp.y)<90){ sitTgt=m; break; } }
+      if(sitTgt){ const sp=mpos(sitTgt), d=Math.hypot(sp.x-BULL.x,sp.y-BULL.y);
+        if(d<20){ satM=sitTgt; satM._sat=true; satT=0; BULL.v=0; snort();
+          say('HE SITS ON HIM. THE CROWD UNDERSTANDS.'); trust=Math.min(100,trust+10); }
+        else { const th=Math.atan2(sp.y-BULL.y,sp.x-BULL.x);
+          BULL.a+=(((th-BULL.a+Math.PI*3)%(Math.PI*2))-Math.PI)*0.08;
+          BULL.v=Math.min(1.4,BULL.v+0.06); }
+      } else {
+        let tgt=null, td=1e9;
+        for(const m of active){ if(m.downT>0) continue; const mp=mpos(m);
+          const d=Math.hypot(BULL.x-mp.x,BULL.y-mp.y); if(m.waveT<30&&d<td){ td=d; tgt=mp; } }
+        if(trust<55 && tgt){ const th=Math.atan2(tgt.y-BULL.y,tgt.x-BULL.x);
+          BULL.a+=(((th-BULL.a+Math.PI*3)%(Math.PI*2))-Math.PI)*0.06;
+          BULL.v=Math.min(2.6,BULL.v+0.05);
+          if(BULL.v>1.4&&(frame%18===0)) hoof();
+        } else BULL.v*=0.95;
+      }
+      BULL.x+=Math.cos(BULL.a)*BULL.v; BULL.y+=Math.sin(BULL.a)*BULL.v; clampRing(BULL,16);
+    }
+    for(const m of active){ if(m===satM) continue;
+      if(m.downT>0){ m.downT--; continue; }
+      const mp=mpos(m);
+      if(Math.hypot(BULL.x-mp.x,BULL.y-mp.y)<26) m.a+=0.25; }
+    /* brute force answers back */
+    if(P.downT===0 && P.invT===0){
+      for(const m of active){ if(m.downT>0 || m.waveT<30) continue;
+        if(dist(mpos(m),P)<16){ P.downT=70; trust=Math.max(0,trust-6); oof(); m.checkT=15;
+          say('AN ALERT MATADOR IS A WALL WITH SHOULDERS.'); break; } }
+      if(P.downT===0 && trust<55 && BULL.v>1.8 && dist(P,BULL)<20){
+        P.downT=70; oof(); say("THE BULL DOESN'T KNOW YOU YET."); }
+    }
+    for(const c of clowns){
+      if(c.fleeT>0){ c.fleeT--; c.x+=(c.x-BULL.x)*0.01; c.y+=(c.y-BULL.y)*0.01; clampRing(c,8); }
+      else if(c.hid<0 && Math.hypot(BULL.x-c.x,BULL.y-c.y)<70 && BULL.v>1.2){
+        let bi=0, bd=1e9;
+        barrels.forEach((b,i)=>{ const d=Math.hypot(c.x-b.x,c.y-b.y); if(d<bd){bd=d;bi=i;} });
+        if(bd<80){ c.hid=bi; yipe(); }
+      } else if(c.hid>=0 && BULL.v<0.4 && Math.random()<0.005) c.hid=-1;
+      else if(c.hid<0 && trust<75 && dist(P,BULL)<80){
+        /* interference: they guard the bull from strangers */
+        const d=dist(c,P);
+        if(d>14){ c.x+=(P.x-c.x)/d*1.35; c.y+=(P.y-c.y)/d*1.35; clampRing(c,8); }
+      }
+    }
+  }
+  for(const m of mats) if(m.flung===1){
+    m.fx+=m.fvx; m.fy+=m.fvy; m.fvy+=0.12; m.spin+=0.02;
+    if(Math.hypot(m.fx-CXA,m.fy-CYA)>RAD+40) m.flung=2;
+  }
+
+  /* stretcher crew state machine */
+  for(const m of mats) if(m._served && m.downT===0 && !m.flung) m._served=false;
+  if(crew.st==='idle'){
+    const need=mats.find(m=>!m._served && (m.downT>0 || m.flung===1));
+    if(need){ const h=crewHome(); crew.x=h.x; crew.y=h.y; crew.tgt=need; crew.st='out'; crew.t=0; yipe(); }
+  } else if(crew.st==='out'){
+    const m=crew.tgt, tp= m.flung? {x:m.fx,y:m.fy} : mpos(m);
+    const d=Math.hypot(tp.x-crew.x,tp.y-crew.y);
+    if(m.flung===2 || (m.downT===0 && !m.flung)){ crew.st='shrug'; crew.t=0; }
+    else if(d<16){ crew.st='attend'; crew.t=0; }
+    else { crew.fx=(tp.x>=crew.x)?1:-1;
+      crew.x+=(tp.x-crew.x)/d*3.2; crew.y+=(tp.y-crew.y)/d*3.2; clampRing(crew,12); }
+  } else if(crew.st==='attend'){
+    crew.t++;
+    const m=crew.tgt;
+    if(m.flung===2 || (m.downT===0 && !m.flung)){ m._served=true; crew.st='shrug'; crew.t=0; }
+  } else if(crew.st==='shrug'){
+    if(++crew.t>60){ if(crew.tgt) crew.tgt._served=true; crew.st='return'; }
+  } else if(crew.st==='return'){
+    const h=crewHome(), d=Math.hypot(h.x-crew.x,h.y-crew.y);
+    if(d<10) crew.st='idle';
+    else { crew.fx=(h.x>=crew.x)?1:-1;
+      crew.x+=(h.x-crew.x)/d*2.4; crew.y+=(h.y-crew.y)/d*2.4; }
+  }
+
+  /* hoof dust */
+  if(BULL.v>1.6 && frame%4===0)
+    puffs.push({x:BULL.x-Math.cos(BULL.a)*18, y:BULL.y-Math.sin(BULL.a)*18, t:0});
+  puffs=puffs.filter(p=>++p.t<24);
+
+  if(rearT>0)rearT--;
+  if(shoveT>0)shoveT--;
+  for(const m of mats) if(m.checkT>0)m.checkT--;
+  if(msgT>0)msgT--;
+}
+
+/* ---------------- draw: the cozy bowl ---------------- */
+const CROWD_PAL=['#f4a9a0','#f7d08a','#a9d1c8','#b3a5d6','#e8b4c8','#fdf1d8','#9fc0e8','#e8946a'];
+const BUNT_PAL=['#e05050','#f2c14e','#4a9e8f','#6a8fd8'];
+const SKINS=['#f0c8a0','#c88f5f','#8f6242'];
+function line(a,b,c,d){ g.beginPath(); g.moveTo(a,b); g.lineTo(c,d); g.stroke(); }
+function label(txt,x,y,tx,ty){ if(!labels)return;
+  g.strokeStyle='#9aa1a8'; g.lineWidth=1; line(x,y,tx,ty);
+  g.font='10px Segoe UI'; const w=g.measureText(txt).width+8;
+  g.fillStyle='#fff'; g.strokeStyle='#c5bfb4';
+  g.fillRect(tx-4,ty-11,w,15); g.strokeRect(tx-4,ty-11,w,15);
+  g.fillStyle='#3a4249'; g.fillText(txt,tx,ty); }
+function ell(x,y,rx,ry){ g.beginPath(); g.ellipse(x,y,rx,ry,0,0,7); }
+
+/* chunky cartoon person. o: {shirt,pants,skin,hat,hatCol,pose,phase,arms,nose} */
+function dude(x,y,s,o){
+  const ph=o.phase||0;
+  g.lineCap='round';
+  function head(hx,hy){
+    g.fillStyle=o.skin||SKINS[0]; ell(hx,hy,4.5*s,4.5*s); g.fill();
+    g.fillStyle='#2b2126';
+    g.fillRect(hx-2.2*s,hy-1*s,1.4*s,1.4*s); g.fillRect(hx+0.8*s,hy-1*s,1.4*s,1.4*s);
+    if(o.nose){ g.fillStyle='#e04040'; ell(hx,hy+1*s,1.7*s,1.7*s); g.fill(); }
+    if(o.hat==='montera'){ g.fillStyle='#2b2126';
+      ell(hx,hy-3.6*s,4.4*s,2*s); g.fill();
+      ell(hx-3.6*s,hy-2.8*s,1.6*s,1.9*s); g.fill(); ell(hx+3.6*s,hy-2.8*s,1.6*s,1.9*s); g.fill(); }
+    else if(o.hat==='cap'){ g.fillStyle=o.hatCol||'#7a5a3a';
+      ell(hx,hy-3.2*s,4.2*s,1.9*s); g.fill(); g.fillRect(hx,hy-3.8*s,5.6*s,1.5*s); }
+    else if(o.hat==='cone'){ g.fillStyle=o.hatCol||'#4a9e8f'; g.beginPath();
+      g.moveTo(hx-3.5*s,hy-2.6*s); g.lineTo(hx+3.5*s,hy-2.6*s); g.lineTo(hx,hy-9*s);
+      g.closePath(); g.fill(); g.fillStyle='#fdf1d8'; ell(hx,hy-9*s,1.3*s,1.3*s); g.fill(); }
+    else if(o.hat==='band'){ g.fillStyle='#f4f1e8'; ell(hx,hy-3.2*s,4.3*s,1.9*s); g.fill();
+      g.fillStyle='#e04040'; g.fillRect(hx-4.3*s,hy-3.6*s,8.6*s,1.2*s); }
+  }
+  if(o.pose==='sit'){
+    g.strokeStyle=o.pants; g.lineWidth=3.5*s;
+    line(x-1*s,y-5*s,x+8*s,y-1.5*s); line(x-1*s,y-4*s,x+8.5*s,y-3.5*s);
+    g.fillStyle=o.shirt; ell(x-1*s,y-9*s,5.5*s,6*s); g.fill();
+    g.strokeStyle=o.shirt; g.lineWidth=3*s;
+    line(x-1*s,y-9*s,x-7*s,y-2*s);
+    head(x-1*s,y-17*s);
+    return;
+  }
+  const sw=(o.pose==='walk'||o.pose==='run')? Math.sin(ph)*(o.pose==='run'?5:3.5)*s : 0;
+  g.strokeStyle=o.pants; g.lineWidth=3.5*s;
+  line(x-2.5*s,y-8*s,x-2.5*s-sw,y); line(x+2.5*s,y-8*s,x+2.5*s+sw,y);
+  g.fillStyle=o.shirt; ell(x,y-13*s,6*s,7.5*s); g.fill();
+  g.strokeStyle=o.shirt; g.lineWidth=3*s;
+  if(o.arms==='up'){ line(x-3*s,y-16*s,x-8*s,y-25*s); line(x+3*s,y-16*s,x+8*s,y-25*s); }
+  else if(o.arms==='carry'){ line(x-3*s,y-14*s,x-9*s,y-11*s); line(x+3*s,y-14*s,x+9*s,y-11*s); }
+  else if(o.arms==='cape'){ line(x+3*s,y-15*s,x+10*s,y-11*s); line(x-3*s,y-14*s,x-6*s,y-8*s); }
+  else { line(x-3*s,y-15*s,x-5*s-sw*0.5,y-8*s); line(x+3*s,y-15*s,x+5*s+sw*0.5,y-8*s); }
+  head(x,y-21*s);
+}
+
+function drawPlane(){
+  /* drag-flag score banner — Raging Beast steal: a tiny plane tows the number */
+  const px=((frame*0.55)%(W+430))-215, py=34+Math.sin(frame*0.02)*3;
+  const txt= P.mounted? '¡HAVOC!' : 'TRUST '+Math.round(trust)+'%';
+  g.font='bold 10px Segoe UI'; const tw=g.measureText(txt).width;
+  /* banner behind the plane */
+  const bx=px-30-tw, by=py-6+Math.sin(frame*0.05)*1.5;
+  g.strokeStyle='#8a939b'; g.lineWidth=1; line(px-12,py,bx+tw+8,by+7);
+  g.fillStyle='#fdf6e0'; g.strokeStyle='#c0392b'; g.lineWidth=1.5;
+  g.fillRect(bx,by,tw+10,14); g.strokeRect(bx,by,tw+10,14);
+  g.fillStyle='#8a2f3c'; g.fillText(txt,bx+5,by+10.5);
+  /* the plane */
+  g.fillStyle='#e8e0d0'; ell(px,py,11,4); g.fill();
+  g.fillStyle='#c0392b'; ell(px-9,py-1,3,4); g.fill();          // tail
+  g.fillStyle='#6a8fd8'; ell(px+1,py+1,7,2); g.fill();           // wing
+  g.strokeStyle='#8a939b'; g.lineWidth=1.5;                      // prop
+  const pr=(frame%2)?5:2; line(px+12,py-pr,px+12,py+pr);
+  if(labels && px>90 && px<W-90) label('drag-flag banner (Raging Beast, 1985)',px,py+4,px-60,py+30);
+}
+
+function draw(){
+  g.setTransform(ZOOM,0,0,ZOOM,0,0);             // the 60% canvas bump lives entirely here
+  /* sky */
+  const sky=g.createLinearGradient(0,0,0,H*0.5);
+  sky.addColorStop(0,'#bfe3ef'); sky.addColorStop(1,'#f6ecd9');
+  g.fillStyle=sky; g.fillRect(0,0,W,H);
+  /* THE BOWL: warm adobe tiers rise BEHIND the ring */
+  for(let t=4;t>=0;t--){
+    const rx=RAD+26+t*16, ry=(RAD+26+t*16)*SQ*0.9, oy=-t*10;
+    g.fillStyle=['#c98a5e','#c2825a','#ba7a55','#b27350','#aa6c4c'][t];
+    ell(CXA,CYA+oy,rx,ry); g.fill();
+    for(let i=0;i<70;i++){ const a=(i/70)*Math.PI*2;
+      const wav=((i+t)%5===0)? Math.sin(frame*0.12+i)*1.6 : 0;
+      const px=CXA+Math.cos(a)*(rx-7), py=CYA+oy+Math.sin(a)*(ry-6)+ (silence?0:wav);
+      if(py>CYA+RAD*SQ*0.62 && t<2) continue;             // the front rows duck out of view
+      const col= silence? '#8a7a6c' : CROWD_PAL[(i*7+t*3)%CROWD_PAL.length];
+      g.fillStyle=col; g.fillRect(px-1.5,py-2.5,3,4.5);
+      g.fillStyle= silence? '#9a8a7a' : SKINS[(i+t)%3];
+      g.fillRect(px-1,py-4.5,2,2);
+    }
+  }
+  drawPlane();
+  /* the ring wall — terracotta with a cream barrera board and bunting */
+  g.fillStyle='#c95f43'; ell(CXA,CYA-8,RAD+14,(RAD+14)*SQ); g.fill();
+  g.fillStyle='#b8543e'; ell(CXA,CYA,RAD+12,(RAD+12)*SQ); g.fill();
+  g.strokeStyle='#f2e5c8'; g.lineWidth=3; ell(CXA,CYA-8,RAD+13,(RAD+13)*SQ); g.stroke();
+  /* bunting along the front wall top */
+  for(let i=0;i<16;i++){ const a=Math.PI*(0.12+0.76*(i/15));
+    const bx2=CXA+Math.cos(a)*(RAD+13), by2=CYA-8+Math.sin(a)*(RAD+13)*SQ;
+    g.fillStyle=BUNT_PAL[i%BUNT_PAL.length]; g.beginPath();
+    g.moveTo(bx2-4,by2); g.lineTo(bx2+4,by2); g.lineTo(bx2,by2+7); g.closePath(); g.fill(); }
+  /* the sand */
+  const sg=g.createRadialGradient(CXA,CYA,20,CXA,CYA,RAD);
+  sg.addColorStop(0,'#f4e2b8'); sg.addColorStop(1,'#e3c98f');
+  g.fillStyle=sg; ell(CXA,CYA,RAD,RAD*SQ); g.fill();
+  g.strokeStyle='rgba(190,160,110,.55)'; g.lineWidth=1;
+  ell(CXA,CYA,RAD*0.62,RAD*0.62*SQ); g.stroke();
+  ell(CXA,CYA,RAD*0.82,RAD*0.82*SQ); g.stroke();
+  /* the gate: an arch in the back wall */
+  const gp=proj(CXA+Math.cos(GATE.a)*RAD, CYA+Math.sin(GATE.a)*RAD);
+  const open=mats.every(m=>m.flung);
+  g.fillStyle= open? '#3f8f5a':'#7a5236';
+  g.beginPath(); g.moveTo(gp.x-16,gp.y+4); g.lineTo(gp.x-16,gp.y-14);
+  g.arc(gp.x,gp.y-14,16,Math.PI,0); g.lineTo(gp.x+16,gp.y+4); g.closePath(); g.fill();
+  g.fillStyle='#2b2320'; g.beginPath(); g.moveTo(gp.x-10,gp.y+3); g.lineTo(gp.x-10,gp.y-12);
+  g.arc(gp.x,gp.y-12,10,Math.PI,0); g.lineTo(gp.x+10,gp.y+3); g.closePath(); g.fill();
+  g.strokeStyle='#f2e5c8'; g.lineWidth=1.5;                      // keystone trim
+  g.beginPath(); g.arc(gp.x,gp.y-14,16,Math.PI,0); g.stroke();
+  if(open&&(frame>>4)%2){ g.fillStyle='#3f8f5a'; g.font='bold 11px Segoe UI'; g.textAlign='center';
+    g.fillText('THE GATE', gp.x, gp.y+18); g.textAlign='left'; }
+
+  /* everything on the sand, far to near */
+  const draws=[];
+  for(const pf of puffs) draws.push({y:pf.y-0.5, f:()=>{ const p=proj(pf.x,pf.y);
+    g.fillStyle='rgba(214,190,140,'+(0.5*(1-pf.t/24))+')';
+    ell(p.x,p.y,(3+pf.t*0.35)*p.s,(2+pf.t*0.25)*p.s); g.fill(); }});
+  barrels.forEach((b,bi)=>draws.push({y:b.y, f:()=>{ const p=proj(b.x,b.y);
+    const hidCi=clowns.findIndex(cl=>cl.hid===bi);
+    if(CIMG.complete&&CIMG.naturalWidth){
+      const spd=Math.hypot(b.vx,b.vy);
+      const cn= hidCi>=0? (hidCi===1?'peek2':'peek') : spd>0.4? (((frame>>3)&1)?'rollA':'rollB') : 'keg';
+      const c=CCELLS[cn], SC=(24*p.s)/93, w=c.w*SC, h=c.h*SC;
+      g.drawImage(CIMG,c.x,c.y,c.w,c.h,p.x-w/2,p.y-h*0.85,w,h);
+    } else {
+      g.fillStyle='#b07a42'; g.strokeStyle='#6a4426'; g.lineWidth=1.5;
+      ell(p.x,p.y,10*p.s,10*p.s*0.8); g.fill(); g.stroke();
+      if(hidCi>=0){ g.fillStyle='#e04040'; ell(p.x,p.y-9*p.s,3*p.s,3*p.s); g.fill(); }
+    } }}));
+  clowns.forEach((c,ci)=>{ if(c.hid>=0) return;   // in the barrel; the peek cell handles it
+    draws.push({y:c.y, f:()=>{ const p=proj(c.x,c.y);
+      if(CIMG.complete&&CIMG.naturalWidth){
+        const run=c.fleeT>0;
+        const cn=(run?(((frame>>3)&1)?'runA':'runB'):'stand')+(ci===1?'2':'');
+        const cc=CCELLS[cn], SC=(28*p.s)/121, w=cc.w*SC, h=cc.h*SC;
+        const heck = trust<75 && dist(P,BULL)<80 && dist(c,P)<26;
+        const fl= run? (c.x>=BULL.x?1:-1) : heck? (P.x>=c.x?1:-1) : (BULL.x>=c.x?1:-1);
+        g.save(); g.translate(p.x,p.y); if(fl<0)g.scale(-1,1);
+        g.drawImage(CIMG,cc.x,cc.y,cc.w,cc.h,-w/2,-h,w,h); g.restore();
+        if(heck){ g.fillStyle='#c0392b'; g.font='bold 10px Segoe UI';
+          g.fillText('HONK!',p.x+8,p.y-32*p.s); }
+      } else dude(p.x,p.y,p.s,{shirt:ci?'#b28ad0':'#f2c14e',pants:'#e05050',skin:SKINS[ci],
+        hat:'cone',hatCol:ci?'#4a9e8f':'#6a8fd8',nose:true,
+        pose:c.fleeT>0?'run':'stand',phase:frame*0.35,arms:c.fleeT>0?'up':null}); }}); });
+  mats.forEach((m,mi)=>{ if(m.flung===2) return;
+    if(m===satM) return;                          // he is under the bull; the cell draws him
+    const MOK=MIMG.complete&&MIMG.naturalWidth;
+    if(m.flung===1){ draws.push({y:m.fy, f:()=>{ const p=proj(m.fx,m.fy);
+      g.save(); g.translate(p.x,p.y); g.rotate(m.spin*frame%6);
+      if(MOK){ const c=MCELLS.fly, SC=(30*p.s)/138, w=c.w*SC, h=c.h*SC;
+        g.drawImage(MIMG,c.x,c.y,c.w,c.h,-w/2,-h/2,w,h); }
+      else dude(0,10,p.s,{shirt:'#4aa39a',pants:'#3a7f78',skin:SKINS[mi%3],hat:'montera',arms:'up'});
+      g.restore();
+      g.fillStyle='#8a2f3c'; g.font='bold 11px Segoe UI'; g.fillText('AIEEE!',p.x+10,p.y-16); }}); return; }
+    const mp=mpos(m);
+    draws.push({y:mp.y, f:()=>{ const p=proj(mp.x,mp.y);
+      if(MOK){
+        const nearB=Math.hypot(BULL.x-mp.x,BULL.y-mp.y)<60 && m.downT===0;
+        const cn= m.checkT>0?'runA'                       /* the counter-shove lunge (matador sheet 2 upgrades this) */
+          : m.downT>0? ((crew.st==='attend'&&crew.tgt===m)?'flat':'down')
+          : nearB? (((frame>>3)&1)?'runA':'runB')
+          : m.waveT<30? (((frame>>4)&1)?'capeA':'capeB')
+          : 'stand';
+        const c=MCELLS[cn], SC=(32*p.s)/138, w=c.w*SC, h=c.h*SC;
+        const fl= m.checkT>0? (P.x>=mp.x?1:-1)
+          : nearB? (mp.x>=BULL.x?1:-1) : (BULL.x>=mp.x?1:-1);
+        g.save(); g.translate(p.x,p.y); if(fl<0)g.scale(-1,1);
+        g.drawImage(MIMG,c.x,c.y,c.w,c.h,-w/2,-h,w,h); g.restore();
+        if(m.downT>0){ g.fillStyle='#8a2f3c'; g.font='10px Segoe UI'; g.fillText('oof',p.x+12*p.s,p.y-24*p.s); }
+        return;
+      }
+      if(m.downT>0){
+        dude(p.x,p.y,p.s,{shirt:'#4aa39a',pants:'#3a7f78',skin:SKINS[mi%3],hat:'montera',pose:'sit'});
+        g.fillStyle='#8a2f3c'; g.font='10px Segoe UI'; g.fillText('oof',p.x+10*p.s,p.y-20*p.s);
+        return; }
+      const waving=m.waveT<30;
+      dude(p.x,p.y,p.s,{shirt:'#4aa39a',pants:'#3a7f78',skin:SKINS[mi%3],hat:'montera',
+        pose:'walk',phase:frame*0.12+mi*2,arms:waving?'cape':null});
+      if(waving){ const wob=Math.sin(frame*0.4)*4*p.s;
+        g.fillStyle='#e86a8a'; g.beginPath();
+        g.moveTo(p.x+9*p.s,p.y-12*p.s);
+        g.quadraticCurveTo(p.x+22*p.s+wob,p.y-6*p.s,p.x+11*p.s,p.y+6*p.s);
+        g.quadraticCurveTo(p.x+16*p.s,p.y-4*p.s,p.x+9*p.s,p.y-12*p.s);
+        g.closePath(); g.fill();
+        g.strokeStyle='#c74e70'; g.lineWidth=1.2;
+        g.beginPath(); g.moveTo(p.x+9*p.s,p.y-12*p.s);
+        g.quadraticCurveTo(p.x+22*p.s+wob,p.y-6*p.s,p.x+11*p.s,p.y+6*p.s); g.stroke(); } }});
+  });
+  /* stretcher crew */
+  if(crew.st!=='idle') draws.push({y:crew.y, f:()=>{ const p=proj(crew.x,crew.y);
+    const running=crew.st==='out'||crew.st==='return';
+    const shrug=crew.st==='shrug';
+    if(KIMG.complete&&KIMG.naturalWidth){
+      const cn= shrug?'shrug': crew.st==='attend'?'kneel': (((frame>>3)&1)?'runA':'runB');
+      const c=KCELLS[cn], SC=(26*p.s)/91, w=c.w*SC, h=c.h*SC;
+      g.save(); g.translate(p.x,p.y); if(crew.fx<0)g.scale(-1,1);
+      g.drawImage(KIMG,c.x,c.y,c.w,c.h,-w/2,-h,w,h); g.restore();
+    } else {
+      g.fillStyle='#fdf6e0'; g.strokeStyle='#c0392b'; g.lineWidth=2*p.s;
+      g.fillRect(p.x-9*p.s,p.y-11*p.s,18*p.s,5*p.s);
+      line(p.x-13*p.s,p.y-8.5*p.s,p.x+13*p.s,p.y-8.5*p.s);
+      dude(p.x-13*p.s,p.y,p.s*0.92,{shirt:'#f4f1e8',pants:'#c0392b',skin:SKINS[1],hat:'band',
+        pose:running?'run':'stand',phase:frame*0.45,arms:shrug?'up':'carry'});
+      dude(p.x+13*p.s,p.y+1,p.s*0.92,{shirt:'#f4f1e8',pants:'#c0392b',skin:SKINS[2],hat:'band',
+        pose:running?'run':'stand',phase:frame*0.45+2,arms:shrug?'up':'carry'});
+    }
+    if(shrug){ g.fillStyle='#8a2f3c'; g.font='bold 12px Segoe UI'; g.fillText('?!',p.x-4,p.y-30*p.s); }
+    label('stretcher crew — always slightly too late (Raging Beast, 1985)',p.x,p.y-14,
+      Math.min(W-300,Math.max(20,p.x-140)),Math.max(94,p.y-58)); }});
+  /* the bull — Scott's sprite cells */
+  draws.push({y:BULL.y, f:()=>{ const p=proj(BULL.x,BULL.y);
+    /* facing: side cells within ~25° of horizontal (with gentle rotation),
+       toward-viewer diagonals heading down, away diagonals heading up */
+    const dxh=Math.cos(BULL.a), dyh=Math.sin(BULL.a);
+    const face= Math.abs(dyh)<0.42 ? 'side' : (dyh>0?'twd':'away');
+    const AB=((frame>>3)&1);
+    let cell;
+    if(satM) cell='sit';
+    else if(rearT>0) cell='rear';
+    else if(BULL.v>0.5){
+      if(face==='side') cell= BULL.v>2.2?(AB?'chargeA':'chargeB'):(AB?'trotA':'trotB');
+      else if(face==='twd') cell= BULL.v>2.2?(AB?'twdChgA':'twdChgB'):(AB?'twdTrotA':'twdTrotB');
+      else cell= BULL.v>2.2?(AB?'awChgA':'awChgB'):(AB?'awTrotA':'awTrotB');
+    } else cell= (!P.mounted&&trust>=75)?'calm':'idle';
+    if(BIMG.complete && BIMG.naturalWidth){
+      const c=BCELLS[cell], SC=0.42*p.s, w=c.w*SC, h=c.h*SC;
+      g.save(); g.translate(p.x,p.y);
+      if(cell==='sit'||cell==='rear'||face!=='side'||BULL.v<=0.5){
+        if(dxh<0) g.scale(-1,1);                                  // upright/diagonal poses: mirror only
+      } else {
+        g.rotate(dxh<0? BULL.a-Math.PI : BULL.a);                 // side poses: mirror, then tilt the residual
+        if(dxh<0) g.scale(-1,1);
+      }
+      g.drawImage(BIMG, c.x,c.y,c.w,c.h, -w/2,-h*0.58, w,h);
+      g.restore();
+    } else {                                                                        // fallback while the sheet loads
+      g.save(); g.translate(p.x,p.y); g.scale(p.s,p.s*0.9); g.rotate(BULL.a);
+      g.fillStyle='#7a5648'; g.strokeStyle='#4e352c'; g.lineWidth=1.5;
+      g.beginPath(); g.ellipse(0,0,16,10,0,0,7); g.fill(); g.stroke();
+      g.beginPath(); g.ellipse(13,0,7,5.5,0,0,7); g.fill(); g.stroke();
+      g.strokeStyle='#f2e5c8'; g.lineWidth=2.5;
+      g.beginPath(); g.moveTo(16,-4); g.quadraticCurveTo(24,-8,26,-3); g.stroke();
+      g.beginPath(); g.moveTo(16,4);  g.quadraticCurveTo(24,8,26,3);  g.stroke();
+      g.restore();
+    }
+    if(!P.mounted && trust>=75){                                                    // he likes you
+      const hb=Math.sin(frame*0.09)*2;
+      g.fillStyle='#e86a8a'; g.font='bold 12px Segoe UI';
+      g.fillText('♥', p.x+16*p.s, p.y-30*p.s+hb); }
+    if(P.mounted && rearT===0){
+      if(HIMG.complete&&HIMG.naturalWidth){
+        const rc=HCELLS[BULL.v>3?'ride2':'ride1'], RS=(30*p.s)/148, rw=rc.w*RS, rh=rc.h*RS;
+        g.save(); g.translate(p.x,p.y-14*p.s); if(dxh<0) g.scale(-1,1);
+        g.drawImage(HIMG,rc.x,rc.y,rc.w,rc.h,-rw/2,-rh,rw,rh); g.restore();
+      } else dude(p.x,p.y-16*p.s,p.s*0.95,{shirt:'#4a7fd0',pants:'#39527a',skin:SKINS[0],
+        hat:'cap',hatCol:'#7a5a3a',arms:BULL.v>3?'up':null});
+    }
+    if(satM) label('the revenge sit (Raging Beast, 1985)',p.x,p.y+8,
+      Math.min(W-320,Math.max(16,p.x-160)),Math.min(H-30,p.y+56)); }});
+  if(!P.mounted) draws.push({y:P.y, f:()=>{ const p=proj(P.x,P.y);
+    if(P.downT>0){                                /* knocked into the sand (hero sheet 2 upgrades this) */
+      if(HIMG.complete&&HIMG.naturalWidth){
+        const c=HCELLS.hop, SC=(34*p.s)/148, w=c.w*SC, h=c.h*SC;
+        g.save(); g.translate(p.x,p.y-6*p.s); g.rotate(pface<0?Math.PI/2:-Math.PI/2);
+        g.drawImage(HIMG,c.x,c.y,c.w,c.h,-w/2,-h/2,w,h); g.restore();
+      }
+      g.fillStyle='#8a2f3c'; g.font='10px Segoe UI'; g.fillText('oof',p.x+10,p.y-18*p.s);
+      return;
+    }
+    if(P.invT>0 && (frame%6<2)) return;           // the getting-up blink
+    const spd=Math.hypot(P.vx,P.vy), still=spd<0.12, nearBull=dist(P,BULL)<70;
+    const hc= shoveT>0?'shove'
+      : (BULL.v>1.8 && trust<55 && dist(P,BULL)<55)?'hop'
+      : (still&&nearBull)?'calm'
+      : spd>0.3?(((frame>>3)&1)?'walkA':'walkB')
+      : 'idle';
+    if(HIMG.complete&&HIMG.naturalWidth){
+      const c=HCELLS[hc], SC=(34*p.s)/148, w=c.w*SC, h=c.h*SC;
+      g.save(); g.translate(p.x,p.y); if(pface<0) g.scale(-1,1);
+      g.drawImage(HIMG,c.x,c.y,c.w,c.h,-w/2,-h,w,h); g.restore();
+    } else dude(p.x,p.y,p.s,{shirt:'#4a7fd0',pants:'#39527a',skin:SKINS[0],hat:'cap',hatCol:'#7a5a3a',
+      pose:spd>0.3?'walk':'stand',phase:frame*0.3});
+    if(Math.hypot(P.vx,P.vy)<0.12 && dist(P,BULL)<70){
+      g.strokeStyle='rgba(63,143,90,.7)'; g.lineWidth=1.5;
+      ell(p.x,p.y-8*p.s,16+Math.sin(frame*0.1)*2,(16+Math.sin(frame*0.1)*2)*0.7); g.stroke(); } }});
+  draws.sort((a,b)=>a.y-b.y);
+  for(const d of draws) d.f();
+
+  /* TRUST — the one meter, two roads into it */
+  const bp=proj(BULL.x,BULL.y), rw=46;
+  g.fillStyle='#fff'; g.strokeStyle='#8a939b'; g.lineWidth=1;
+  g.fillRect(bp.x-rw/2,bp.y-34*bp.s,rw,7); g.strokeRect(bp.x-rw/2,bp.y-34*bp.s,rw,7);
+  g.fillStyle= trust>=75?'#3f8f5a':trust>=40?'#e8a33c':'#c0392b';
+  g.fillRect(bp.x-rw/2+1,bp.y-33*bp.s,(rw-2)*trust/100,5);
+  g.fillStyle='#3a4249'; g.font='9px Segoe UI'; g.fillText('TRUST',bp.x-rw/2,bp.y-37*bp.s);
+
+  if(msgT>0){ g.fillStyle='rgba(30,36,42,.85)'; g.font='bold 13px Segoe UI'; g.textAlign='center';
+    g.fillText(msg, CXA, H-16); g.textAlign='left'; }
+  if(silence){
+    const a=Math.min(0.82,silenceT/90);
+    g.fillStyle='rgba(246,239,226,'+a+')'; g.fillRect(0,0,W,H);
+    if(silenceT>40){
+      /* end card as a bullring poster — the MUNDO/HOSPITAL gag shape, our text */
+      g.fillStyle='#fdf6e0'; g.strokeStyle='#c0392b'; g.lineWidth=3;
+      g.fillRect(CXA-190,CYA-92,380,184); g.strokeRect(CXA-190,CYA-92,380,184);
+      g.strokeStyle='#e8a33c'; g.lineWidth=1.5; g.strokeRect(CXA-182,CYA-84,364,168);
+      g.textAlign='center';
+      g.fillStyle='#c0392b'; g.font='bold 11px Segoe UI'; g.fillText('P L A Z A   D E   T O R O S', CXA, CYA-62);
+      g.fillStyle='#2b3238'; g.font='bold 21px Georgia'; g.fillText('THE CROWD GOES SILENT.', CXA, CYA-28);
+      g.font='13px Segoe UI'; g.fillText('You ride him out under the arch. Nobody claps. That\'s the point.', CXA, CYA+2);
+      g.fillStyle='#8a2f3c'; g.font='bold 12px Georgia'; g.fillText('EL MEJOR AMIGO DEL TORO', CXA, CYA+32);
+      g.font='11px Segoe UI'; g.fillStyle='#68737c';
+      g.fillText('(real build: the escape continues OUTSIDE — streets, then open country)', CXA, CYA+62);
+      g.textAlign='left'; }
+  }
+}
+function loop(){ update(); draw(); requestAnimationFrame(loop); }
+loop();
+</script>
+</body>
+</html>

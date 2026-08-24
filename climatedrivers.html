@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CLIMATE DRIVERS</title>
+<meta name="description" content="A cozy driving game about the nine planetary boundaries. Keep the town fed. Watch the needles.">
+<style>
+  :root{
+    --paper:#f3efe4; --ink:#2b2a26; --dim:#6f6a5e; --line:#d8d2c2;
+    --warm:#c9772e; --deep:#7a4a1c; --good:#4d8a52; --bad:#b4472f;
+    --dash:#e7e0cd; --glass:#fbf8f0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#e6e0d0;color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif;}
+  #wrap{max-width:980px;margin:0 auto;padding:10px 10px 26px;}
+  h1{font-size:19px;letter-spacing:3px;margin:8px 2px 2px;font-weight:800;}
+  h1 small{display:block;font-size:11px;letter-spacing:2px;color:var(--dim);
+    font-weight:600;margin-top:3px;}
+  #cv{display:block;width:100%;height:auto;background:var(--paper);
+    border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 6px 22px rgba(60,50,30,.16);touch-action:none;}
+  .foot{font-size:12px;color:var(--dim);margin:10px 2px;line-height:1.6}
+  .foot a{color:var(--deep)}
+  #small{display:none;padding:26px;border:1px solid var(--line);border-radius:10px;
+    background:var(--glass);font-size:14px;line-height:1.7}
+  @media (max-width:760px){ #cv{display:none} #small{display:block} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>CLIMATE DRIVERS<small>keep the town fed &middot; watch the needles</small></h1>
+  <canvas id="cv" width="960" height="720"></canvas>
+  <div id="small">
+    <b>CLIMATE DRIVERS needs a wider screen.</b><br>
+    It is a driving game with a nine-gauge dashboard, and the dashboard does not
+    survive being folded into a phone. Come back on something with a keyboard.
+  </div>
+  <div class="foot">
+    <b>ARROWS</b> drive (hold up &mdash; the truck is heavy) &middot;
+    <b>SPACE</b> work the pad you are standing on &middot;
+    <b>TAB</b> map &middot; <b>P</b> pause &middot; <b>R</b> restart<br>
+    Nine gauges, nine boundaries, one truck.
+    <a href="/grishnak/">1980s-ish Arcade Games</a> &middot;
+    <a href="/text-adventures.html">text adventures</a>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const W=960, H=720, SH=498;            // SH = scene height; the rest is dashboard
+const FONT='"Segoe UI",system-ui,sans-serif';
+
+/* ---------------------------------------------------------------- helpers */
+function rr(c,x,y,w,h,r){ r=Math.min(r,w/2,h/2); c.beginPath();
+  c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+/* MULTIPLICATIVE, like the rest of the family: shade('#88aa44',0.8) darkens. */
+function shade(hex,m){
+  const n=parseInt(hex.slice(1),16);
+  const r=Math.max(0,Math.min(255,Math.round(((n>>16)&255)*m)));
+  const g=Math.max(0,Math.min(255,Math.round(((n>>8)&255)*m)));
+  const b=Math.max(0,Math.min(255,Math.round((n&255)*m)));
+  return '#'+((1<<24)|(r<<16)|(g<<8)|b).toString(16).slice(1);
+}
+function mix(a,b,t){
+  const A=parseInt(a.slice(1),16), B=parseInt(b.slice(1),16);
+  const r=Math.round(((A>>16)&255)*(1-t)+((B>>16)&255)*t);
+  const g=Math.round(((A>>8)&255)*(1-t)+((B>>8)&255)*t);
+  const c=Math.round((A&255)*(1-t)+(B&255)*t);
+  return '#'+((1<<24)|(r<<16)|(g<<8)|c).toString(16).slice(1);
+}
+function shadow(x,y,rx,ry,a){ ctx.fillStyle='rgba(70,58,34,'+(a||0.17)+')';
+  ctx.beginPath(); ctx.ellipse(x,y,rx,ry,0,0,7); ctx.fill(); }
+function txt(s,x,y,size,col,align,weight){
+  ctx.font=(weight||600)+' '+size+'px '+FONT; ctx.fillStyle=col||'#2b2a26';
+  ctx.textAlign=align||'left'; ctx.fillText(s,x,y); ctx.textAlign='left';
+}
+/* Centred text that WRAPS. The ending's closing line is two sentences long and
+   ran off both edges of the canvas until this existed. Returns the y it ended on. */
+function wrapTxt(s,x,y,size,col,maxW,lh,weight){
+  ctx.font=(weight||600)+' '+size+'px '+FONT; ctx.fillStyle=col||'#2b2a26';
+  ctx.textAlign='center';
+  const words=s.split(' '); let line='';
+  for(let i=0;i<words.length;i++){
+    const tryLine=line?line+' '+words[i]:words[i];
+    if(ctx.measureText(tryLine).width>maxW && line){
+      ctx.fillText(line,x,y); y+=lh; line=words[i];
+    } else line=tryLine;
+  }
+  if(line){ ctx.fillText(line,x,y); y+=lh; }
+  ctx.textAlign='left';
+  return y;
+}
+/* a deterministic scatter so every screen's detail is stable between visits */
+function rnd(seed){ let s=seed; return function(){ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
+
+/* -------------------------------------------------------- the nine gauges */
+/* Values are 0..1. The BOUNDARY LINE sits at 0.5 — above it is transgressed.
+   Seven of nine start transgressed, which is where the real world is as of the
+   2025 Planetary Health Check. Aerosols and ozone start inside the line, and
+   ozone is the one humanity actually walked back. */
+const BD=[
+ {id:'climate',  n:'CLIMATE',   core:1, v:0.63, full:'Climate change'},
+ {id:'biosphere',n:'BIOSPHERE', core:1, v:0.80, full:'Biosphere integrity'},
+ {id:'land',     n:'LAND',      v:0.60, full:'Land-system change'},
+ {id:'water',    n:'WATER',     v:0.56, full:'Freshwater change'},
+ {id:'np',       n:'N / P',     v:0.71, full:'Biogeochemical flows'},
+ {id:'ocean',    n:'OCEAN',     v:0.54, full:'Ocean acidification'},
+ {id:'novel',    n:'NOVEL',     v:0.68, full:'Novel entities'},
+ {id:'aerosol',  n:'AEROSOL',   v:0.34, full:'Atmospheric aerosols'},
+ {id:'ozone',    n:'OZONE',     v:0.26, full:'Stratospheric ozone'}
+];
+const B={}; BD.forEach(b=>{ b.v0=b.v; b.retired=0; B[b.id]=b; });
+
+/* Cascade wires: [from, to, strength]. Pushing one needle drips into another,
+   on a delay, which is the whole subject. The AEROSOL -> CLIMATE wire is
+   NEGATIVE: aerosols cool. Cleaning your air raises your climate needle. That
+   is real (aerosol masking) and it is the nastiest decision in the game. */
+const WIRE=[
+ ['land','biosphere',0.34],['land','climate',0.26],['land','water',0.24],
+ ['np','water',0.30],['np','ocean',0.38],
+ ['climate','ocean',0.40],['climate','biosphere',0.36],['climate','water',0.22],
+ ['novel','biosphere',0.28],
+ ['aerosol','climate',-0.40]
+];
+let flow=[];   // live cascade particles, purely so the player can SEE it travel
+
+/* ------------------------------------------------------------ the screens */
+/* 3x3. Driving off an edge moves you to the neighbour, grishnak-style. */
+const GRID=[['arctic','ocean','beach'],
+            ['savannah','land','lake'],
+            ['crops','industry','grid']];
+const SC={
+ arctic:{t:'THE ARCTIC', b:'aerosol', ground:'#e8eef2', accent:'#9fc4d8',
+   pay:26, push:{aerosol:0.030, climate:0.012},
+   who:'Ines, ice-road hauler',
+   say:['The road holds till April. Always has.',
+        'Season is shorter than it was. Still fine. Mostly fine.',
+        'I go around now. The bubbles come up under the ice and it does not set.']},
+ ocean:{t:'THE OCEAN', b:'ocean', ground:'#cfe2e6', accent:'#5f97a6',
+   pay:30, push:{ocean:0.026, climate:0.010},
+   who:'Tobin, on the long boat',
+   say:['Best water in the world, this.',
+        'Shells are thinner. Buyer noticed before I did.',
+        'Nothing builds out here any more. It just dissolves what it makes.']},
+ beach:{t:'THE BEACH', b:'np', ground:'#f0e6cd', accent:'#d8c48f',
+   pay:24, push:{np:0.022, ocean:0.014},
+   who:'Captain Ade',
+   say:['Fish are in close today. Easy money.',
+        'Had to run forty miles for the same catch.',
+        'My fish moved a hundred miles north. I did not. That is the whole story.']},
+ savannah:{t:'THE SAVANNAH', b:'biosphere', ground:'#e5d9a8', accent:'#b9a45f',
+   pay:28, push:{biosphere:0.028, land:0.010},
+   who:'Nkechi, counts the herd',
+   say:['Big herd this year. You should see them at dusk.',
+        'Fewer of the big ones. The count is down again.',
+        'I still walk out and count. It does not take as long as it did.']},
+ land:{t:'THE WOODLOT', b:'land', ground:'#d7dfae', accent:'#7fa055',
+   pay:32, push:{land:0.030, biosphere:0.012},
+   who:'Bram, cuts and plants',
+   say:['Cut one, plant two. That is the deal.',
+        'Cut two, plant one. Prices, you know how it is.',
+        'The stumps stay. I leave them. Feels wrong to tidy them away.']},
+ lake:{t:'THE LAKE', b:'water', ground:'#dbe7d9', accent:'#6f9fb0',
+   pay:26, push:{water:0.028, np:0.012},
+   who:'Sunna, runs the dock',
+   say:['Water is right up to the boards. Perfect.',
+        'Had to add a step to the dock this spring.',
+        'Dock ends in air now. There is a ring on the rock where the water was.']},
+ crops:{t:'THE CROPS', b:'np', ground:'#e9dfa6', accent:'#c9a83f',
+   pay:34, push:{np:0.034, water:0.012, climate:0.008},
+   who:'Halvard, forty acres',
+   say:['Good ground. Feeds the whole town, this field.',
+        'Takes more sacks each year for the same yield.',
+        'Whatever I do not use runs downhill. I know where it goes. I use it anyway.']},
+ industry:{t:'THE WORKS', b:'novel', ground:'#ded8cc', accent:'#8d8478',
+   pay:38, push:{novel:0.032, climate:0.012, aerosol:0.010},
+   who:'Delia, shift lead',
+   say:['Cleanest works in the county. We are proud of it.',
+        'Some of the drums came without labels. Above my grade.',
+        'Everything downstream has a sheen on it now. It does not wash off.']},
+ grid:{t:'THE POWER GRID', b:'climate', ground:'#e2ddd2', accent:'#a0968a',
+   pay:40, push:{climate:0.034, aerosol:0.012},
+   who:'Osman, keeps the lines',
+   say:['Lines are singing today. Everything is up.',
+        'They sag in the heat. I let them cool before I climb.',
+        'Shimmer comes off the wires by ten in the morning now.']}
+};
+Object.keys(SC).forEach(k=>{ SC[k].key=k; SC[k].cool=0; SC[k].clean=0; });
+
+/* ------------------------------------------------------------------ state */
+let S, keys={}, paused=false, mapOpen=false, frame=0, over=null, titled=true;
+function reset(){
+  BD.forEach(b=>{ b.v=b.v0; b.retired=0; });
+  Object.keys(SC).forEach(k=>{ SC[k].cool=0; SC[k].clean=0; });
+  flow=[];
+  S={ cr:1, cc:1,                       // current screen row/col
+      x:W/2, y:SH/2, vx:0, vy:0, ang:-Math.PI/2,
+      money:60, town:0.78, jobs:0, t:0,
+      msg:'', msgT:0, dust:[] };
+  over=null;
+}
+function scr(){ return SC[GRID[S.cr][S.cc]]; }
+
+/* how far past the line a boundary is, 0..1 — drives every visual change */
+function over5(b){ return Math.max(0, (b.v-0.5)/0.5); }
+function stage(b){ return b.v<0.5?0 : b.v<0.72?1 : 2; }
+function crossed(){ return BD.filter(b=>b.v>=0.5).length; }
+
+function say(m){ S.msg=m; S.msgT=170; }
+
+/* --------------------------------------------------------------- the work */
+function doWork(){
+  const s=scr();
+  if(s.cool>0){ say('Nothing to load here yet. Come back.'); return; }
+  const b=B[s.b];
+  /* a degraded screen pays less, permanently — the boundary IS the economy */
+  const dec=1-0.45*over5(b);
+  const clean=s.clean?0.45:1;                       // retired forcing = softer push
+  const pay=Math.round(s.pay*dec*(s.clean?0.82:1)); // clean work pays a bit less
+  S.money+=pay; S.town=Math.min(1,S.town+0.085); S.jobs++;
+  for(const k in s.push){ push(k, s.push[k]*clean, s); }
+  s.cool=190;
+  say('+$'+pay+(dec<0.85?'  (this place does not pay what it did)':''));
+}
+function push(id,amt,fromScreen){
+  const b=B[id]; if(!b) return;
+  b.v=Math.max(0,Math.min(1, b.v+amt*(1-0.55*b.retired)));
+  /* fire the visible cascade */
+  WIRE.forEach(w=>{ if(w[0]===id && Math.abs(amt)>0.004){
+    flow.push({from:id,to:w[1],amt:amt*w[2],t:0,life:80});
+  }});
+}
+function retire(){
+  const s=scr(), b=B[s.b];
+  if(s.clean){ say('Already retired here.'); return; }
+  const cost=190+Math.round(120*over5(b));
+  if(S.money<cost){ say('Retiring the forcing here costs $'+cost+'. You have $'+S.money+'.'); return; }
+  S.money-=cost; s.clean=1; b.retired=Math.min(1,b.retired+0.6);
+  say('Retired. This place will push less, forever. It also pays less.');
+}
+
+/* ------------------------------------------------------------------ input */
+addEventListener('keydown',e=>{
+  const k=e.key;
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','Tab'].includes(k)) e.preventDefault();
+  if(titled){ titled=false; return; }
+  keys[k]=true;
+  if(k==='p'||k==='P') paused=!paused;
+  if(k==='Tab') mapOpen=!mapOpen;
+  if(k==='r'||k==='R') reset();
+  if(over && (k===' '||k==='Enter')) reset();
+  if(k===' '&&!over&&!paused&&!mapOpen){
+    const s=scr();
+    if(nearPad(s,'work')) doWork(); else if(nearPad(s,'clean')) retire();
+    else say('Drive onto a pad, then press SPACE.');
+  }
+});
+addEventListener('keyup',e=>{ keys[e.key]=false; });
+cv.addEventListener('mousedown',()=>{ if(titled) titled=false; });
+
+/* pads: the WORK pad and the RETIRE pad, fixed spots on every screen */
+function padPos(s,kind){ return kind==='work' ? {x:W*0.30,y:SH*0.62} : {x:W*0.70,y:SH*0.62}; }
+function nearPad(s,kind){ const p=padPos(s,kind);
+  return Math.hypot(S.x-p.x, S.y-p.y) < 62; }
+
+/* ------------------------------------------------------------------ drive */
+function drive(){
+  const ACC=0.135, TURN=0.049, FRIC=0.955;
+  if(keys['ArrowUp'])    { S.vx+=Math.cos(S.ang)*ACC; S.vy+=Math.sin(S.ang)*ACC; }
+  if(keys['ArrowDown'])  { S.vx*=0.92; S.vy*=0.92; }
+  const sp=Math.hypot(S.vx,S.vy);
+  /* micro-steering: you can only turn while rolling, and a loaded truck turns
+     lazily at speed. The weight is the whole sensation. */
+  const auth=Math.min(1, sp/1.6)*(1-Math.min(0.45, sp/16));
+  if(keys['ArrowLeft'])  S.ang-=TURN*auth;
+  if(keys['ArrowRight']) S.ang+=TURN*auth;
+  /* heat softens asphalt: grip falls as the climate needle climbs */
+  const grip=1-0.030*over5(B.climate);
+  S.vx*=FRIC*grip; S.vy*=FRIC*grip;
+  S.x+=S.vx; S.y+=S.vy;
+
+  if(sp>0.7 && frame%3===0) S.dust.push({x:S.x,y:S.y,a:0.30,r:3});
+  S.dust=S.dust.filter(d=>{ d.a-=0.012; d.r+=0.35; return d.a>0; });
+
+  /* edge transitions */
+  let moved=false;
+  if(S.x<-14){ if(S.cc>0){S.cc--; S.x=W+8; moved=true;} else S.x=-14, S.vx=Math.abs(S.vx)*0.4; }
+  if(S.x>W+14){ if(S.cc<2){S.cc++; S.x=-8; moved=true;} else S.x=W+14, S.vx=-Math.abs(S.vx)*0.4; }
+  if(S.y<-14){ if(S.cr>0){S.cr--; S.y=SH+8; moved=true;} else S.y=-14, S.vy=Math.abs(S.vy)*0.4; }
+  if(S.y>SH+14){ if(S.cr<2){S.cr++; S.y=-8; moved=true;} else S.y=SH+14, S.vy=-Math.abs(S.vy)*0.4; }
+  if(moved) say(scr().t);
+}
+
+/* ------------------------------------------------------------------- tick */
+function tick(){
+  frame++;
+  if(titled||paused||mapOpen||over) return;
+  S.t++;
+  drive();
+  if(S.msgT>0) S.msgT--;
+  Object.keys(SC).forEach(k=>{ if(SC[k].cool>0) SC[k].cool--; });
+
+  /* the town eats. You cannot abstain; refusing to drive is its own ending. */
+  S.town-=0.00050;
+  if(S.town<=0){ over={win:0, why:'The town went dark while you were deciding.',
+     tail:'There is no version of this where nobody drives. That was never the question.'}; }
+
+  /* cascades arrive on a delay, and you watch them travel */
+  flow.forEach(f=>{ f.t++; if(f.t===f.life){ const b=B[f.to];
+    if(b) b.v=Math.max(0,Math.min(1,b.v+f.amt*(1-0.55*b.retired))); } });
+  flow=flow.filter(f=>f.t<f.life);
+
+  /* slow drift back for anything retired — a needle CAN walk backwards, and
+     ozone is the proof: humanity actually did this one. */
+  BD.forEach(b=>{ if(b.retired>0) b.v=Math.max(0, b.v-0.00009*b.retired); });
+  /* Except the ocean. Acidification does not recover on human timescales —
+     the carbonate chemistry takes tens of thousands of years — so this needle
+     only ever moves ONE WAY. It is the reason the win condition below is what
+     it is: "all nine" is not on the menu and the game never pretends it is. */
+  const oc=B.ocean; oc.floor=Math.max(oc.floor||0, oc.v); oc.v=Math.max(oc.v, oc.floor);
+
+  if(BD.filter(b=>b.id!=='ocean' && b.v>=0.5).length===0){
+    over={win:1, why:'Eight of nine back inside the line, and the lights still on.',
+      tail:'The ocean stays where it is. That one was never yours to fix — the water '+
+           'will still be putting itself right ten thousand years after the town forgets your name.'}; }
+  if(BD.filter(b=>b.v>0.93).length>=4){ over={win:0,
+    why:'Cascade lock. The needles drive each other faster than you can drive at all.',
+    tail:'Not one of them crossed alone. That was always the mechanism.'}; }
+}
+
+/* ============================================================ SCENE DRAWING
+   Cozy 3/4: everything sits on an ellipse of shadow, everything is drawn
+   warm, and the damage arrives INSIDE that warmth rather than replacing it.
+   Never make it ugly on purpose. Let it stay lovely and let details go wrong. */
+
+function ground(s,dmg){
+  const g=ctx.createLinearGradient(0,0,0,SH);
+  /* Damage desaturates the ground, but only a LITTLE. The whole design rests on
+     the place staying lovely while the details go wrong — bleach the colour out
+     and it becomes an ordinary grim game about the environment, which is the one
+     thing nobody finishes. Never make it ugly on purpose. */
+  const base=mix(s.ground, '#c5bda6', dmg*0.26);
+  g.addColorStop(0, shade(base,0.90)); g.addColorStop(1, shade(base,1.04));
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,SH);
+  /* horizon band, sells the 3/4 without any real perspective maths */
+  const sky=ctx.createLinearGradient(0,0,0,96);
+  sky.addColorStop(0, mix('#c3d9e6','#d6ccb6',dmg*0.5)); sky.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=sky; ctx.fillRect(0,0,W,96);
+  const r=rnd(s.key.length*9187+11);
+  /* the dirt track you actually drive on — gives the ground somewhere to BE */
+  ctx.strokeStyle='rgba(150,126,88,.16)'; ctx.lineWidth=54; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-30,SH*0.72);
+  ctx.bezierCurveTo(W*0.30,SH*0.50, W*0.66,SH*0.86, W+30,SH*0.60); ctx.stroke();
+  ctx.lineWidth=1; ctx.lineCap='butt';
+  /* fine texture + grass tufts — the "finer detail" ask, cheap and stable */
+  ctx.fillStyle='rgba(120,104,72,.06)';
+  for(let i=0;i<520;i++){ const x=r()*W, y=100+r()*(SH-100); ctx.fillRect(x,y,2,1); }
+  const tuft=mix(shade(s.accent,0.92), '#b3a986', dmg*0.5);
+  for(let i=0;i<74;i++){
+    const x=r()*W, y=112+r()*(SH-150);
+    ctx.strokeStyle=tuft; ctx.lineWidth=1.8;
+    for(let b=-1;b<2;b++){ ctx.beginPath(); ctx.moveTo(x+b*2.4,y);
+      ctx.lineTo(x+b*4.4, y-6-((b*b)?2:4)); ctx.stroke(); }
+  }
+}
+function tree(x,y,sc,col,dead){
+  shadow(x,y+2,15*sc,5*sc);
+  ctx.fillStyle=shade('#6b4a2a',1); ctx.fillRect(x-2.5*sc,y-16*sc,5*sc,16*sc);
+  if(dead) return;
+  for(let i=0;i<3;i++){ ctx.fillStyle=shade(col,1-i*0.10);
+    ctx.beginPath(); ctx.ellipse(x,y-20*sc-i*7*sc,(15-i*3)*sc,(11-i*2)*sc,0,0,7); ctx.fill(); }
+}
+function stump(x,y,sc){ shadow(x,y+2,10*sc,4*sc);
+  ctx.fillStyle='#7d5a35'; rr(ctx,x-5*sc,y-6*sc,10*sc,6*sc,2); ctx.fill();
+  ctx.fillStyle='#a8814f'; ctx.beginPath(); ctx.ellipse(x,y-6*sc,5*sc,2.4*sc,0,0,7); ctx.fill(); }
+function house(x,y,w,h,body,roof){
+  shadow(x,y+3,w*0.62,7);
+  ctx.fillStyle=body; rr(ctx,x-w/2,y-h,w,h,3); ctx.fill();
+  ctx.fillStyle=roof; ctx.beginPath(); ctx.moveTo(x-w/2-5,y-h);
+  ctx.lineTo(x,y-h-16); ctx.lineTo(x+w/2+5,y-h); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,246,214,.92)'; rr(ctx,x-6,y-h*0.62,11,10,2); ctx.fill();
+}
+function water(x,y,w,h,col,dmg,seed){
+  ctx.fillStyle=mix(col, '#8f9f6d', dmg*0.55);
+  rr(ctx,x,y,w,h,16); ctx.fill();
+  ctx.save(); rr(ctx,x,y,w,h,16); ctx.clip();
+  for(let i=0;i<9;i++){
+    const yy=y+12+i*(h/9);
+    ctx.strokeStyle='rgba(255,255,255,'+(0.30-i*0.02)+')'; ctx.lineWidth=2;
+    ctx.beginPath();
+    for(let xx=x;xx<x+w;xx+=8)
+      ctx.lineTo(xx, yy+Math.sin((xx*0.035)+(frame*0.02)+i+seed)*2.4);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function person(x,y,shirt,label){
+  ctx.save(); ctx.translate(x,y); ctx.scale(1.35,1.35); ctx.translate(-x,-y);
+  shadow(x,y+2,9,3.6);
+  ctx.fillStyle='#3b3a36'; ctx.fillRect(x-4,y-11,3,11); ctx.fillRect(x+1,y-11,3,11);
+  ctx.fillStyle=shirt; rr(ctx,x-6,y-24,12,14,3); ctx.fill();
+  ctx.fillStyle='#e0b48c'; ctx.beginPath(); ctx.arc(x,y-29,5.4,0,7); ctx.fill();
+  ctx.fillStyle='#4a3b2c'; ctx.beginPath(); ctx.arc(x,y-31,5.4,Math.PI,0); ctx.fill();
+  ctx.restore();
+  if(label){ txt(label,x,y-58,12,'#5c5548','center',700); }
+}
+function pad(x,y,label,col,ready){
+  const pu=0.5+0.5*Math.sin(frame*0.07);
+  shadow(x,y+4,44,15,0.13);
+  ctx.fillStyle=ready?mix(col,'#ffffff',0.20*pu):'#cbc4b4';
+  ctx.beginPath(); ctx.ellipse(x,y,42,15,0,0,7); ctx.fill();
+  ctx.strokeStyle=ready?shade(col,0.72):'#b0a998'; ctx.lineWidth=2.4;
+  ctx.beginPath(); ctx.ellipse(x,y,42,15,0,0,7); ctx.stroke();
+  txt(label,x,y+4,11,ready?'#3a3226':'#8b8474','center',800);
+}
+function truck(x,y,ang){
+  shadow(x,y+13,25,9,0.20);
+  ctx.save(); ctx.translate(x,y); ctx.rotate(ang+Math.PI/2); ctx.scale(1.34,1.34);
+  ctx.fillStyle='#3c3a36'; rr(ctx,-13,-6,26,9,2); ctx.fill();     // wheels bar
+  ctx.fillStyle='#b8452f'; rr(ctx,-11,-19,22,26,4); ctx.fill();   // body
+  ctx.fillStyle=shade('#b8452f',0.80); rr(ctx,-11,-4,22,11,3); ctx.fill();
+  ctx.fillStyle='#dfe9ef'; rr(ctx,-8,-16,16,9,2); ctx.fill();     // windscreen
+  ctx.fillStyle='rgba(255,246,214,.95)';
+  ctx.beginPath(); ctx.arc(-7,-19,2.6,0,7); ctx.arc(7,-19,2.6,0,7); ctx.fill();
+  ctx.restore();
+}
+
+/* ---- per-screen furniture. Each screen hosts one boundary and shows it. --- */
+function scene(){
+  const s=scr(), b=B[s.b], dmg=over5(b), st=stage(b);
+  ground(s,dmg);
+  const r=rnd(s.key.length*7717+3);
+
+  if(s.key==='land'){
+    for(let i=0;i<22;i++){ const x=40+r()*(W-80), y=150+r()*(SH-230);
+      const gone=i < Math.round(22*dmg*0.8);
+      gone? stump(x,y,1.5) : tree(x,y,1.45, mix('#5f8a3e','#8a8f4a',dmg));
+    }
+  }
+  if(s.key==='savannah'){
+    for(let i=0;i<9;i++){ const x=60+r()*(W-120), y=160+r()*(SH-240);
+      tree(x,y,1.15, mix('#7d9042','#9d9560',dmg)); }
+    const herd=Math.max(1, Math.round(9*(1-dmg*0.85)));
+    for(let i=0;i<herd;i++){ const x=110+r()*(W-220), y=220+r()*(SH-300);
+      shadow(x,y+2,13,5); ctx.fillStyle='#8a6a44'; rr(ctx,x-11,y-13,22,12,4); ctx.fill();
+      ctx.fillStyle='#7a5c3a'; ctx.beginPath(); ctx.arc(x+12,y-14,5,0,7); ctx.fill(); }
+  }
+  if(s.key==='crops'){
+    for(let row=0;row<7;row++) for(let cl=0;cl<26;cl++){
+      const x=48+cl*34, y=175+row*40+((cl%2)*4);
+      const h=15*(1-dmg*0.35);
+      ctx.strokeStyle=mix('#c8a437','#a89a5e',dmg); ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+Math.sin(frame*0.02+cl)*2, y-h); ctx.stroke();
+      ctx.fillStyle=mix('#e8c24a','#bcae72',dmg);
+      ctx.beginPath(); ctx.ellipse(x,y-h,3.4,5,0,0,7); ctx.fill();
+    }
+    /* the runoff that will physically arrive at the lake, then the beach */
+    if(dmg>0.15){ ctx.fillStyle='rgba(126,158,74,'+(0.16+dmg*0.30)+')';
+      rr(ctx,0,SH-58,W,58,0); ctx.fill();
+      for(let i=0;i<5;i++){ ctx.fillStyle='rgba(150,180,86,.5)';
+        ctx.beginPath(); ctx.ellipse(90+i*190+Math.sin(frame*0.02+i)*10, SH-30, 40,11,0,0,7); ctx.fill(); } }
+    for(let i=0;i<Math.round(2+dmg*7);i++){
+      const x=760+ (i%3)*32, y=200+Math.floor(i/3)*22;
+      shadow(x,y+2,12,4); ctx.fillStyle='#d6cdb2'; rr(ctx,x-11,y-15,22,15,3); ctx.fill();
+      ctx.fillStyle='#a89b74'; ctx.fillRect(x-11,y-9,22,3); }
+  }
+  if(s.key==='lake'){
+    const shrink=dmg*0.30;
+    water(90+W*shrink*0.20, 170+20*shrink, W-180-W*shrink*0.40, SH-300, '#7fb2c4', dmg*0.55, 1);
+    /* bathtub ring: the waterline it used to reach */
+    if(dmg>0.12){ ctx.strokeStyle='rgba(150,132,92,'+(0.30+dmg*0.35)+')'; ctx.lineWidth=5;
+      ctx.setLineDash([12,9]); rr(ctx,90,170,W-180,SH-300,16); ctx.stroke(); ctx.setLineDash([]); }
+    /* the dock, which ends in air once the water pulls back */
+    ctx.fillStyle='#a3805a'; rr(ctx,W/2-15,SH-190,30,120,3); ctx.fill();
+    ctx.fillStyle='#8a6a48'; for(let i=0;i<6;i++) ctx.fillRect(W/2-15,SH-186+i*20,30,3);
+    house(150,SH-84,58,40,'#e2d6bd','#a35c3a');
+  }
+  if(s.key==='beach'){
+    ctx.fillStyle=mix('#efe3c6','#ded0a8',dmg*0.4); ctx.fillRect(0,SH-190,W,190);
+    water(0,120,W,SH-300,'#77a8bb',dmg*0.35,2);
+    /* Scott's algae "monster" — a bloom big enough to read as a creature */
+    if(dmg>0.22){
+      const a=0.30+dmg*0.42; ctx.fillStyle='rgba(112,152,64,'+a+')';
+      ctx.beginPath();
+      for(let i=0;i<=44;i++){ const th=i/44*Math.PI*2;
+        const rad=64+dmg*74+Math.sin(th*4+frame*0.018)*15+Math.sin(th*7-frame*0.011)*9;
+        const px=W*0.62+Math.cos(th)*rad, py=232+Math.sin(th)*rad*0.52;
+        i?ctx.lineTo(px,py):ctx.moveTo(px,py); }
+      ctx.closePath(); ctx.fill();
+      /* two darker patches that the eye insists on reading as eyes */
+      ctx.fillStyle='rgba(64,92,40,'+(a+0.20)+')';
+      ctx.beginPath(); ctx.ellipse(W*0.62-26,222,9,7,0,0,7);
+      ctx.ellipse(W*0.62+22,226,9,7,0,0,7); ctx.fill();
+    }
+    /* dead fish after a deoxygenation event */
+    const dead=Math.round(dmg*11);
+    for(let i=0;i<dead;i++){ const x=70+((i*137)%(W-140)), y=SH-150+((i*61)%110);
+      shadow(x,y+2,11,3.5,0.12);
+      ctx.fillStyle='#cbb9a4'; ctx.beginPath();
+      ctx.ellipse(x,y,11,4.6,0.25,0,7); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x+10,y); ctx.lineTo(x+17,y-5); ctx.lineTo(x+17,y+4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle='#6e6357'; ctx.beginPath(); ctx.arc(x-6,y-1.4,1.5,0,7); ctx.fill(); }
+  }
+  if(s.key==='ocean'){
+    water(0,110,W,SH-190,'#5f97a6',dmg*0.30,3);
+    /* the reef greys out and never comes back */
+    for(let i=0;i<13;i++){ const x=60+r()*(W-120), y=SH-150+r()*90;
+      const col=mix('#e08a6a','#b9b3ab',Math.min(1,dmg*1.25));
+      shadow(x,y+3,15,5,0.10); ctx.fillStyle=col;
+      for(let f=0;f<4;f++){ ctx.beginPath();
+        ctx.ellipse(x-9+f*6, y-8-((f%2)*7), 5.5, 11, (f-1.5)*0.30, 0, 7); ctx.fill(); } }
+    /* the long boat */
+    shadow(W*0.30,258,44,10,0.16);
+    ctx.fillStyle='#d9cbb0'; ctx.beginPath();
+    ctx.moveTo(W*0.30-52,244); ctx.lineTo(W*0.30+52,244);
+    ctx.lineTo(W*0.30+34,266); ctx.lineTo(W*0.30-34,266); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#9a5f3c'; rr(ctx,W*0.30-12,222,24,22,3); ctx.fill();
+  }
+  if(s.key==='arctic'){
+    ctx.fillStyle=mix('#f2f6f8','#cfd8d2',dmg*0.55); ctx.fillRect(0,120,W,SH-120);
+    /* dark meltwater spreading where white used to be */
+    if(dmg>0.10){ ctx.fillStyle='rgba(74,110,128,'+(0.24+dmg*0.42)+')';
+      for(let i=0;i<5;i++){ const x=110+i*185, y=250+((i*53)%150);
+        ctx.beginPath(); ctx.ellipse(x,y,52+dmg*44,20+dmg*17,0,0,7); ctx.fill(); } }
+    /* Scott's methane bubbles, caught under the ice */
+    for(let i=0;i<Math.round(4+dmg*22);i++){
+      const ph=(frame*0.6+i*47)%260;
+      const x=90+((i*97)%(W-180)), y=SH-40-ph*0.9;
+      if(y<150) continue;
+      ctx.fillStyle='rgba(255,255,255,'+(0.62-ph/620)+')';
+      ctx.beginPath(); ctx.arc(x,y,3+((i%3)*1.6),0,7); ctx.fill();
+      ctx.strokeStyle='rgba(150,178,190,.55)'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.arc(x,y,3+((i%3)*1.6),0,7); ctx.stroke();
+    }
+    for(let i=0;i<5;i++){ const x=70+r()*(W-140), y=170+r()*(SH-260);
+      shadow(x,y+2,22,7,0.10);
+      ctx.fillStyle='#ffffff'; ctx.beginPath();
+      ctx.moveTo(x-24,y); ctx.lineTo(x-13,y-21); ctx.lineTo(x+11,y-25);
+      ctx.lineTo(x+24,y); ctx.closePath(); ctx.fill(); }
+  }
+  if(s.key==='industry'){
+    house(200,SH-96,120,74,'#cfc7ba','#8d7f6e');
+    house(W-230,SH-96,96,60,'#d5cdc0','#8d7f6e');
+    for(let i=0;i<3;i++){ const x=350+i*90;
+      shadow(x,SH-96,17,6); ctx.fillStyle='#b8b0a3'; rr(ctx,x-13,SH-232,26,136,3); ctx.fill();
+      ctx.fillStyle='#a49b8d'; rr(ctx,x-16,SH-238,32,10,3); ctx.fill();
+      /* smoke: thin and white when clean, thick and grey when not */
+      for(let p=0;p<7;p++){ const ph=(frame*0.5+p*30+i*17)%210;
+        ctx.fillStyle='rgba(150,145,138,'+((0.10+dmg*0.30)*(1-ph/210))+')';
+        ctx.beginPath(); ctx.arc(x+Math.sin(ph*0.03+i)*13, SH-244-ph, 9+ph*0.10,0,7); ctx.fill(); } }
+    /* unlabelled drums, and the sheen that never washes off */
+    for(let i=0;i<Math.round(3+dmg*10);i++){ const x=640+((i%5)*36), y=250+Math.floor(i/5)*34;
+      shadow(x,y+2,11,4); ctx.fillStyle=i%3?'#9aa47f':'#b0a07a'; rr(ctx,x-10,y-22,20,22,3); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.30)'; ctx.fillRect(x-10,y-16,20,3); }
+    if(dmg>0.2){ const g=ctx.createLinearGradient(0,SH-60,W,SH);
+      g.addColorStop(0,'rgba(150,120,180,'+(dmg*0.16)+')');
+      g.addColorStop(0.5,'rgba(120,170,150,'+(dmg*0.20)+')');
+      g.addColorStop(1,'rgba(170,150,110,'+(dmg*0.16)+')');
+      ctx.fillStyle=g; ctx.fillRect(0,SH-60,W,60); }
+  }
+  if(s.key==='grid'){
+    for(let i=0;i<4;i++){ const x=140+i*230;
+      shadow(x,SH-110,15,6);
+      ctx.strokeStyle='#8e8577'; ctx.lineWidth=5;
+      ctx.beginPath(); ctx.moveTo(x-16,SH-110); ctx.lineTo(x,SH-250);
+      ctx.lineTo(x+16,SH-110); ctx.moveTo(x-11,SH-180); ctx.lineTo(x+11,SH-180); ctx.stroke();
+      if(i<3){ ctx.strokeStyle='#6f665a'; ctx.lineWidth=2.2;
+        for(let w=0;w<2;w++){ const yy=SH-244+w*17;
+          ctx.beginPath(); ctx.moveTo(x,yy);
+          ctx.quadraticCurveTo(x+115, yy+26+dmg*26, x+230, yy); ctx.stroke(); } } }
+    /* heat shimmer over the lines */
+    if(dmg>0.12){ ctx.save(); ctx.globalAlpha=0.12+dmg*0.22;
+      for(let i=0;i<28;i++){ const y=SH-262+ (i*4);
+        ctx.strokeStyle='#ffffff'; ctx.lineWidth=1.6; ctx.beginPath();
+        for(let x=0;x<W;x+=14) ctx.lineTo(x, y+Math.sin(x*0.06+frame*0.09+i)*2.6);
+        ctx.stroke(); } ctx.restore(); }
+    house(W-160,SH-90,80,52,'#ded6c8','#96856f');
+  }
+
+  /* pads, resident, truck — every screen has them, drawn last so they sit on top */
+  const wp=padPos(s,'work'), cp=padPos(s,'clean');
+  pad(wp.x,wp.y, s.cool>0?'LOADING…':'WORK  [SPACE]', '#c9772e', s.cool<=0);
+  pad(cp.x,cp.y, s.clean?'RETIRED':'RETIRE  [SPACE]', '#4d8a52', !s.clean);
+  /* the resident stands clear of the quote box that carries their line */
+  person(W*0.155, SH-120, ['#5b7fa6','#8a6ea8','#a86e5b'][s.key.length%3], s.who.split(',')[0]);
+
+  S.dust.forEach(d=>{ ctx.fillStyle='rgba(140,124,92,'+d.a+')';
+    ctx.beginPath(); ctx.arc(d.x,d.y,d.r,0,7); ctx.fill(); });
+  truck(S.x,S.y,S.ang);
+
+  /* smog cuts your draw distance — the aerosol gauge you can SEE */
+  const smog=over5(B.aerosol);
+  if(smog>0.02){ ctx.fillStyle='rgba(206,198,180,'+(smog*0.42)+')'; ctx.fillRect(0,0,W,SH); }
+
+  /* screen name + the resident's line for this stage */
+  ctx.fillStyle='rgba(251,248,240,.90)'; rr(ctx,14,14,300,50,8); ctx.fill();
+  ctx.strokeStyle='rgba(120,108,84,.35)'; ctx.lineWidth=1.5;
+  rr(ctx,14,14,300,50,8); ctx.stroke();
+  txt(s.t,26,38,16,'#2b2a26','left',800);
+  txt(s.full||s.who,26,55,12,'#6f6a5e','left',600);
+  const line=s.say[st];
+  ctx.fillStyle='rgba(251,248,240,.92)'; rr(ctx,W*0.50-300,SH-46,600,34,8); ctx.fill();
+  ctx.strokeStyle='rgba(120,108,84,.28)'; rr(ctx,W*0.50-300,SH-46,600,34,8); ctx.stroke();
+  txt('“'+line+'”  — '+s.who, W*0.50, SH-24, 13, '#4c473c','center',600);
+
+  if(S.msgT>0){ const a=Math.min(1,S.msgT/28);
+    ctx.fillStyle='rgba(43,42,38,'+(0.88*a)+')'; rr(ctx,W/2-215,86,430,34,8); ctx.fill();
+    txt(S.msg,W/2,108,14,'rgba(255,250,238,'+a+')','center',700); }
+}
+
+/* ======================================================= THE DASHBOARD ==== */
+function gaugeBig(x,y,rad,b){
+  const dmg=over5(b);
+  ctx.fillStyle='#f7f3e8'; ctx.beginPath(); ctx.arc(x,y,rad,0,7); ctx.fill();
+  ctx.strokeStyle='#b9b099'; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(x,y,rad,0,7); ctx.stroke();
+  /* safe arc, then the transgressed arc */
+  const A0=Math.PI*0.75, A1=Math.PI*2.25;
+  ctx.lineWidth=6; ctx.strokeStyle='#bcd7bd';
+  ctx.beginPath(); ctx.arc(x,y,rad-11,A0,A0+(A1-A0)*0.5); ctx.stroke();
+  ctx.strokeStyle='#e3b6a8';
+  ctx.beginPath(); ctx.arc(x,y,rad-11,A0+(A1-A0)*0.5,A1); ctx.stroke();
+  /* the boundary line itself */
+  const bl=A0+(A1-A0)*0.5;
+  ctx.strokeStyle='#8a3f2c'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.moveTo(x+Math.cos(bl)*(rad-19),y+Math.sin(bl)*(rad-19));
+  ctx.lineTo(x+Math.cos(bl)*(rad-3),y+Math.sin(bl)*(rad-3)); ctx.stroke();
+  /* the needle — slow and smooth. A needle that twitches reads as an alarm;
+     one that creeps reads as fate, which is the correct feeling. */
+  const a=A0+(A1-A0)*Math.max(0,Math.min(1,b.v));
+  ctx.strokeStyle=b.v>=0.5?'#b4472f':'#4d8a52'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+Math.cos(a)*(rad-15),y+Math.sin(a)*(rad-15)); ctx.stroke();
+  ctx.fillStyle='#3b382f'; ctx.beginPath(); ctx.arc(x,y,4.5,0,7); ctx.fill();
+  txt(b.n,x,y+rad-16,12,'#4c473c','center',800);
+  if(b.retired>0) txt('retiring',x,y+rad-5,9,'#4d8a52','center',700);
+  return dmg;
+}
+function gaugeSmall(x,y,rad,b){
+  ctx.fillStyle='#f7f3e8'; ctx.beginPath(); ctx.arc(x,y,rad,0,7); ctx.fill();
+  ctx.strokeStyle='#c2b9a2'; ctx.lineWidth=1.8; ctx.beginPath(); ctx.arc(x,y,rad,0,7); ctx.stroke();
+  const A0=Math.PI*0.75, A1=Math.PI*2.25, bl=A0+(A1-A0)*0.5;
+  ctx.lineWidth=3.4; ctx.strokeStyle='#bcd7bd';
+  ctx.beginPath(); ctx.arc(x,y,rad-6,A0,bl); ctx.stroke();
+  ctx.strokeStyle='#e3b6a8'; ctx.beginPath(); ctx.arc(x,y,rad-6,bl,A1); ctx.stroke();
+  const a=A0+(A1-A0)*Math.max(0,Math.min(1,b.v));
+  ctx.strokeStyle=b.v>=0.5?'#b4472f':'#4d8a52'; ctx.lineWidth=2.2;
+  ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+Math.cos(a)*(rad-8),y+Math.sin(a)*(rad-8)); ctx.stroke();
+  ctx.fillStyle='#3b382f'; ctx.beginPath(); ctx.arc(x,y,2.6,0,7); ctx.fill();
+  txt(b.n,x,y+rad+13,10,'#5c5548','center',800);
+  if(b.retired>0) txt('·',x,y+rad+22,12,'#4d8a52','center',800);
+}
+/* gauge positions, computed once so the cascade wires can find them */
+const GP={};
+(function layout(){
+  const cy=SH+86;
+  /* the two CORE boundaries, drawn large and central like a speedometer and a
+     tachometer — Steffen 2015 says transgressing either alone could flip the
+     system, so the science hierarchy and the UI hierarchy are the same one */
+  GP.climate  ={x:W*0.385,y:cy,r:60};
+  GP.biosphere={x:W*0.615,y:cy,r:60};
+  /* seven auxiliaries, balanced four left and three right */
+  GP.land   ={x:64, y:cy-32, r:28};  GP.water ={x:146,y:cy-32, r:28};
+  GP.np     ={x:64, y:cy+42, r:28};  GP.ocean ={x:146,y:cy+42, r:28};
+  GP.novel  ={x:W-146,y:cy-32,r:28}; GP.aerosol={x:W-64,y:cy-32,r:28};
+  GP.ozone  ={x:W-105,y:cy+42,r:28};
+})();
+
+function dash(){
+  ctx.fillStyle='#ded7c4'; ctx.fillRect(0,SH,W,H-SH);
+  const g=ctx.createLinearGradient(0,SH,0,H);
+  g.addColorStop(0,'rgba(255,255,255,.55)'); g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,SH,W,H-SH);
+  ctx.strokeStyle='#b9b099'; ctx.lineWidth=2; ctx.beginPath();
+  ctx.moveTo(0,SH+1); ctx.lineTo(W,SH+1); ctx.stroke();
+
+  /* cascade wires FIRST, under the gauges */
+  ctx.lineWidth=1.4;
+  WIRE.forEach(w=>{ const a=GP[w[0]], b2=GP[w[1]]; if(!a||!b2) return;
+    ctx.strokeStyle= w[2]<0 ? 'rgba(90,120,160,.30)' : 'rgba(150,120,80,.26)';
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b2.x,b2.y); ctx.stroke(); });
+  /* live cascade particles travelling along their wire */
+  flow.forEach(f=>{ const a=GP[f.from], b2=GP[f.to]; if(!a||!b2) return;
+    const t=f.t/f.life, x=a.x+(b2.x-a.x)*t, y=a.y+(b2.y-a.y)*t;
+    ctx.fillStyle= f.amt<0 ? 'rgba(70,110,160,.85)' : 'rgba(180,71,47,.85)';
+    ctx.beginPath(); ctx.arc(x,y,3.4,0,7); ctx.fill(); });
+
+  gaugeBig(GP.climate.x,GP.climate.y,GP.climate.r,B.climate);
+  gaugeBig(GP.biosphere.x,GP.biosphere.y,GP.biosphere.r,B.biosphere);
+  ['land','water','np','ocean','novel','aerosol','ozone'].forEach(id=>{
+    gaugeSmall(GP[id].x,GP[id].y,GP[id].r,B[id]); });
+
+  txt('CORE',GP.climate.x,SH+18,10,'#8a8271','center',800);
+  txt('CORE',GP.biosphere.x,SH+18,10,'#8a8271','center',800);
+
+  /* Money / town / count live in the clear band ALONG THE BOTTOM. They used to
+     sit at the right, where they crowded the AEROSOL and OZONE gauges — the two
+     boundaries still inside the line, which are exactly the two you most need to
+     be able to read. */
+  const by=H-16;
+  ctx.fillStyle='rgba(255,255,255,.40)'; rr(ctx,10,by-24,W-20,32,8); ctx.fill();
+  txt('$'+S.money, 24, by, 20,'#3b382f','left',800);
+  txt('TOWN', 116, by-9, 10,'#7d7565','left',800);
+  ctx.fillStyle='#c9c1ad'; rr(ctx,160,by-16,150,13,7); ctx.fill();
+  ctx.fillStyle= S.town<0.25?'#b4472f': S.town<0.5?'#c9772e':'#4d8a52';
+  rr(ctx,160,by-16,150*Math.max(0,S.town),13,7); ctx.fill();
+  txt(crossed()+' of 9 past the line', 336, by-4, 13, crossed()>6?'#b4472f':'#5c5548','left',700);
+  txt('TAB map · P pause · R restart', W-24, by-4, 11, '#8a8271','right',600);
+}
+
+/* --------------------------------------------------------------- the map */
+function drawMap(){
+  ctx.fillStyle='rgba(30,28,24,.80)'; ctx.fillRect(0,0,W,H);
+  const cw=224, ch=126, ox=(W-cw*3-40)/2, oy=96;
+  txt('THE ROUND',W/2,64,20,'#f3efe4','center',800);
+  for(let r=0;r<3;r++) for(let c=0;c<3;c++){
+    const s=SC[GRID[r][c]], b=B[s.b], d=over5(b);
+    const x=ox+c*(cw+20), y=oy+r*(ch+20);
+    ctx.fillStyle=mix(s.ground,'#8d8474',d*0.5); rr(ctx,x,y,cw,ch,10); ctx.fill();
+    ctx.strokeStyle=(r===S.cr&&c===S.cc)?'#c9772e':'rgba(255,255,255,.30)';
+    ctx.lineWidth=(r===S.cr&&c===S.cc)?4:1.6; rr(ctx,x,y,cw,ch,10); ctx.stroke();
+    txt(s.t,x+14,y+26,14,'#2b2a26','left',800);
+    txt(b.full,x+14,y+44,11,'#57503f','left',600);
+    ctx.fillStyle='rgba(255,255,255,.55)'; rr(ctx,x+14,y+56,cw-28,9,5); ctx.fill();
+    ctx.fillStyle=b.v>=0.5?'#b4472f':'#4d8a52'; rr(ctx,x+14,y+56,(cw-28)*b.v,9,5); ctx.fill();
+    txt(s.clean?'retired':'active', x+14, y+ch-14, 11, s.clean?'#2f6b34':'#7a5c3a','left',700);
+    if(s.cool>0) txt('loading', x+cw-16, y+ch-14, 11, '#7a7365','right',700);
+  }
+  txt('TAB to close', W/2, H-30, 12, 'rgba(243,239,228,.75)','center',600);
+}
+
+/* ------------------------------------------------------- title and ending */
+function drawTitle(){
+  ctx.fillStyle='#f3efe4'; ctx.fillRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#dbe6ea'); g.addColorStop(1,'#f3efe4'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  for(let i=0;i<9;i++) tree(90+i*98, 476+((i%3)*16), 1.5, '#5f8a3e');
+  truck(W/2,556,-Math.PI/2);
+  txt('CLIMATE DRIVERS',W/2,214,52,'#2b2a26','center',800);
+  txt('Nine gauges. Nine boundaries. One truck.',W/2,252,17,'#6f6a5e','center',600);
+  txt('The town has to eat, and every load you take moves a needle.',W/2,300,15,'#57503f','center',600);
+  txt('You cannot deliver nothing. That was never the question.',W/2,324,15,'#57503f','center',600);
+  txt('ARROWS drive  ·  SPACE work a pad  ·  TAB map  ·  P pause',W/2,376,14,'#7d7565','center',700);
+  const pu=0.5+0.5*Math.sin(frame*0.06);
+  txt('press any key',W/2,420,16,'rgba(122,74,28,'+(0.5+pu*0.5)+')','center',800);
+  txt('GRISHNAK',W/2,H-26,12,'#a79d89','center',800);
+}
+function drawOver(){
+  ctx.fillStyle='rgba(28,26,22,.90)'; ctx.fillRect(0,0,W,H);
+  txt(over.win?'EIGHT OF NINE':'THE ROUND ENDS',W/2,258,38,over.win?'#9fd0a4':'#e6b8a8','center',800);
+  let y=wrapTxt(over.why,W/2,312,17,'#f3efe4',640,25,600);
+  y=wrapTxt(over.tail,W/2,y+12,15,'rgba(243,239,228,.72)',600,23,600);
+  txt('Jobs run: '+S.jobs+'   ·   $'+S.money+'   ·   '+crossed()+' of 9 past the line',
+      W/2,y+30,14,'rgba(243,239,228,.62)','center',600);
+  txt('SPACE to drive again',W/2,y+72,15,'#c9a06e','center',800);
+}
+
+/* ------------------------------------------------------------------- loop */
+function loop(){
+  tick();
+  if(titled){ drawTitle(); requestAnimationFrame(loop); return; }
+  scene(); dash();
+  if(mapOpen) drawMap();
+  if(paused){ ctx.fillStyle='rgba(30,28,24,.62)'; ctx.fillRect(0,0,W,H);
+    txt('PAUSED',W/2,H/2,34,'#f3efe4','center',800);
+    txt('P to carry on',W/2,H/2+30,14,'rgba(243,239,228,.72)','center',600); }
+  if(over) drawOver();
+  requestAnimationFrame(loop);
+}
+reset(); loop();
+
+/* exposed for the test harness only */
+window.CD={ B:B, BD:BD, SC:SC, WIRE:WIRE, GRID:GRID, GP:GP,
+  state:()=>S, over:()=>over, crossed:crossed, over5:over5, stage:stage,
+  work:doWork, retire:retire, push:push, tick:tick, reset:reset,
+  /* tick() idles behind the title card, so a harness has to dismiss it first —
+     the same reason VARIANCE's tests need skipIntro() */
+  start:()=>{ titled=false; paused=false; mapOpen=false; },
+  setScreen:(r,c)=>{S.cr=r;S.cc=c;}, scr:scr,
+  flow:()=>flow, keys:keys, W:W, H:H, SH:SH };
+})();
+</script>
+</body>
+</html>

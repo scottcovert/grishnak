@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>The Drowned Fair — a text adventure</title>
+<meta name="description" content="A seaside text adventure of the old school, told at greater length. Find the five prizes that went down with the pier and get them home to the cabinet.">
+<link rel="icon" href="../images/SCicon.png">
+
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-WJCV4CNB');</script>
+<!-- GA4 + Google Ads -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CZT1T2DW66"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', 'G-CZT1T2DW66');
+gtag('config', 'AW-18034350349');
+</script>
+
+<style>
+  /* the same C64 bezel as the Terminal (text-adventures.html) — this page is a sibling of
+     the archive, so it wears the archive's clothes. */
+  :root{
+    --border:#7C70DA; --screen:#40318D; --text:#b7adf2; --bright:#e6e0ff;
+    --input:#d9d2ff; --sys:#83e08a; --npc:#ffd76e; --err:#ff8f80; --white:#ffffff;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:#2b2170; color:var(--text);
+    font-family:"Courier New",ui-monospace,Menlo,Consolas,monospace;
+    overflow:hidden; -webkit-text-size-adjust:100%;
+  }
+  #frame{
+    position:fixed; inset:0; background:var(--border);
+    padding:min(3vmin,26px); display:flex; flex-direction:column;
+  }
+  #screen{
+    flex:1; background:var(--screen); border-radius:6px;
+    display:flex; flex-direction:column; min-height:0;
+    box-shadow:inset 0 0 60px rgba(0,0,0,.35);
+    position:relative; overflow:hidden;
+  }
+  #screen::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(rgba(0,0,0,.10) 0 1px, transparent 1px 3px);
+    mix-blend-mode:multiply; opacity:.5;
+  }
+  #status{
+    flex:0 0 auto; display:flex; justify-content:space-between; gap:10px;
+    background:var(--text); color:var(--screen); font-weight:bold;
+    padding:6px 12px; letter-spacing:.5px; font-size:clamp(11px,1.8vw,15px);
+    text-transform:uppercase; z-index:2;
+  }
+  #status .t{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #body{flex:1; display:flex; min-height:0;}
+  /* The narrative column takes whatever the divider leaves it. Its text stays
+     readable because .ln is capped at 65ch, not because the column is capped —
+     so widening it never produces a 200-character line. */
+  #out{
+    flex:1 1 0; min-width:0; overflow-y:auto; padding:16px clamp(12px,4vw,40px);
+    font-size:clamp(14px,2.1vw,18px); line-height:1.5; z-index:1;
+    scrollbar-width:thin; scrollbar-color:var(--border) var(--screen);
+  }
+  #out::-webkit-scrollbar{width:10px;} #out::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px;}
+
+  /* ---- right companion rail ---- */
+  #rail{flex:0 0 400px; min-width:0;
+    display:flex; flex-direction:column; gap:12px; padding:14px 12px 18px;
+    overflow-y:auto; background:rgba(0,0,0,.14); z-index:1;}
+  @media (max-width:900px){ #rail{display:none;} }
+
+  /* the draggable divider */
+  #split{
+    flex:0 0 9px; cursor:col-resize; position:relative; z-index:2;
+    border-left:2px solid var(--border); background:transparent;
+    touch-action:none;
+  }
+  #split:hover, #split.dragging, #split:focus{background:rgba(124,112,218,.40); outline:none;}
+  #split .grip{
+    position:absolute; top:50%; left:2px; transform:translateY(-50%);
+    width:5px; height:46px; border-radius:3px; background:var(--border); opacity:.8;
+  }
+  #split:hover .grip, #split.dragging .grip{opacity:1; background:var(--bright);}
+  @media (max-width:900px){ #split{display:none;} }
+  .railhd{color:var(--sys); font-size:12px; letter-spacing:2px; margin:0 0 6px;
+    border-bottom:1px dashed var(--border); padding-bottom:3px;}
+  .dim{color:var(--text); opacity:.55; font-size:13px;}
+  #mapview{overflow:auto; max-height:400px; background:rgba(0,0,0,.20);
+    border:1px solid var(--border); border-radius:4px; padding:14px;
+    cursor:grab; user-select:none;}
+  #mapview.dragging{cursor:grabbing;}
+  #mapview::-webkit-scrollbar{width:8px;height:8px;} #mapview::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+  #mapinner{position:relative; margin:0 auto; min-width:40px; min-height:40px;}
+  .mapempty{color:var(--text); opacity:.5; font-size:12px; text-align:center; padding:22px 0;}
+  .maproom{position:absolute; box-sizing:border-box;
+    border:2px solid var(--border); border-radius:3px; background:var(--screen);
+    color:var(--bright); font-size:10px; line-height:1.06; letter-spacing:.4px;
+    display:flex; align-items:center; justify-content:center; text-align:center; padding:2px; overflow:hidden;}
+  .maproom.cur{background:var(--border); color:#fff; box-shadow:0 0 9px var(--border);}
+  .maproom .ud{position:absolute; top:-2px; right:2px; font-size:10px; color:var(--sys);}
+  .mapedge{position:absolute; background:var(--border); opacity:.7;}
+  #exitsrow{display:flex; align-items:center; justify-content:center; gap:14px;}
+  #compass{display:grid; grid-template-columns:repeat(3,38px); gap:4px; font-size:12px; text-align:center;}
+  .cp{padding:7px 0; color:var(--text); opacity:.22;}
+  .cp[data-d]{border:1px solid var(--border); border-radius:3px; opacity:.35; cursor:pointer;}
+  .cp.on{opacity:1; color:#fff; background:var(--border);}
+  .cp-mid{font-size:12px; color:var(--sys); opacity:.6; display:flex; align-items:center; justify-content:center;}
+  #stairs{display:flex; flex-direction:column; gap:8px;}
+  .stair{margin:0; font-size:9px; line-height:1.15; color:var(--text); opacity:.22;
+    font-family:inherit; letter-spacing:0; cursor:pointer;}
+  .stair.on{opacity:1; color:var(--sys); text-shadow:0 0 6px rgba(131,224,138,.5);}
+  #carrying{font-size:13px; line-height:1.55;}
+  #carrying .it{color:var(--input);}
+  #cabinet{font-size:13px; line-height:1.55;}
+  #cabinet .it{color:var(--npc);}
+  #rank{color:var(--npc); font-size:13px; font-weight:bold;}
+  #scopeline{font-size:12px; line-height:1.45; padding:2px 2px 0; letter-spacing:.3px;}
+
+  /* hard 65-character reading column */
+  .ln{white-space:pre-wrap; word-wrap:break-word; animation:fin .18s ease-out both;
+      margin:0; max-width:65ch;}
+  .para{margin:0 0 .72em;}
+  @keyframes fin{from{opacity:0;} to{opacity:1;}}
+  .c-text{color:var(--text);} .c-bright{color:var(--bright);} .c-white{color:var(--white);}
+  .c-cmd{color:var(--input);} .c-sys{color:var(--sys);} .c-npc{color:var(--npc);} .c-err{color:var(--err);}
+  .c-head{color:var(--white); font-weight:bold; letter-spacing:1.5px;}
+  .c-sep{color:var(--border); letter-spacing:6px; text-align:center; max-width:65ch;}
+
+  #inbar{
+    display:flex; align-items:center; gap:8px; z-index:2;
+    padding:2px 0 8px; font-size:clamp(14px,2.1vw,18px);
+  }
+  #prompt{color:var(--sys); font-weight:bold;}
+  #cmd{
+    flex:1; background:transparent; outline:none;
+    border:1px solid var(--white); border-radius:4px; padding:5px 9px;
+    color:var(--input); font-family:inherit; font-size:inherit; caret-color:var(--input);
+  }
+  #cmd::placeholder{color:var(--text); opacity:.55;}
+
+  /* boot overlay */
+  #boot{
+    position:absolute; inset:0; z-index:5; background:var(--screen);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px; text-align:center; overflow-y:auto;
+  }
+  #boot h1{color:var(--white); font-size:clamp(22px,4.5vw,40px); margin:0 0 4px; letter-spacing:3px;}
+  #boot .sub{color:var(--text); font-size:clamp(12px,2.3vw,16px); margin-bottom:22px;}
+  #boot .blurb{width:min(760px,92vw); text-align:left; color:var(--text);
+    font-size:clamp(12px,1.95vw,15px); line-height:1.6;}
+  #boot .blurb p{margin:0 0 11px;}
+  #boot .blurb b{color:var(--bright);}
+  #boot .blurb .note{color:var(--sys);}
+  #bootbtns{display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin-top:22px;}
+  .btn{
+    background:var(--border); color:var(--white); border:none; border-radius:6px;
+    font-family:inherit; font-weight:bold; padding:9px 16px; cursor:pointer; letter-spacing:1px;
+    font-size:clamp(11px,1.8vw,14px); text-decoration:none; display:inline-block;
+  }
+  .btn:hover{filter:brightness(1.12);}
+  .btn[disabled]{opacity:.45; cursor:default;}
+  #topbtns{position:absolute; top:8px; right:10px; z-index:3; display:flex; gap:8px;}
+</style>
+</head>
+<body>
+<div id="frame">
+  <div id="screen">
+
+    <div id="topbtns">
+      <a class="btn" href="../text-adventures.html" title="Back to the archive">MENU</a>
+      <button class="btn" id="saveBtn" title="Save">SAVE</button>
+      <button class="btn" id="loadBtn" title="Load">LOAD</button>
+      <button class="btn" id="fsBtn" title="Fullscreen">&#9974; FULL</button>
+    </div>
+
+    <div id="status">
+      <span class="t" id="stTitle">THE DROWNED FAIR</span>
+      <span id="stScore">SCORE 0 / MOVES 0</span>
+    </div>
+
+    <div id="body">
+      <div id="out" aria-live="polite"></div>
+      <div id="split" tabindex="0" role="separator" aria-orientation="vertical"
+           aria-label="resize the map column"
+           title="drag to resize &mdash; double-click to reset"><div class="grip"></div></div>
+      <aside id="rail">
+        <div id="scopeline" class="dim">A parser game. Whole sentences. No AI anywhere in it.</div>
+
+        <div class="railsec">
+          <div class="railhd">MAP</div>
+          <div id="mapview"><div id="mapinner"><div class="mapempty">unmapped</div></div></div>
+        </div>
+
+        <div class="railsec">
+          <div class="railhd">EXITS</div>
+          <div id="exitsrow">
+            <div id="compass">
+              <span class="cp">&nbsp;</span><span class="cp" data-d="north">N</span><span class="cp">&nbsp;</span>
+              <span class="cp" data-d="west">W</span><span class="cp cp-mid">&#183;</span><span class="cp" data-d="east">E</span>
+              <span class="cp">&nbsp;</span><span class="cp" data-d="south">S</span><span class="cp">&nbsp;</span>
+            </div>
+            <div id="stairs">
+              <pre id="stairUp" class="stair" data-d="up">    &#9484;&#9472;
+  &#9484;&#9472;&#9496;
+&#9484;&#9472;&#9496; UP</pre>
+              <pre id="stairDn" class="stair" data-d="down">&#9488;&#9472;&#9488;
+  &#9492;&#9472;&#9488;
+    &#9492;&#9472; DN</pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="railsec">
+          <div class="railhd">YOU ARE CARRYING</div>
+          <div id="carrying"><div class="dim">nothing</div></div>
+        </div>
+
+        <div class="railsec">
+          <div class="railhd">THE PRIZE CABINET</div>
+          <div id="cabinet"><div class="dim">five ring-marks in the dust</div></div>
+        </div>
+
+        <div class="railsec">
+          <div class="railhd">RANK</div>
+          <div id="rank" class="dim">&mdash;</div>
+        </div>
+      </aside>
+    </div>
+
+    <div id="inbar" style="display:none;">
+      <span id="prompt">&gt;</span>
+      <input id="cmd" autocomplete="off" autocapitalize="off" spellcheck="false"
+             enterkeyhint="send" aria-label="type a command" placeholder="type a command and press enter">
+    </div>
+
+    <!-- boot screen -->
+    <div id="boot">
+      <h1>THE DROWNED FAIR</h1>
+      <div class="sub">an adventure of the old school, told at rather greater length</div>
+      <div class="blurb">
+        <p>In the winter of 1911 the pleasure pier at Sarnwick went into the sea. It went in a
+        single night, in weather the harbourmaster's log calls <b>ordinary</b>, and it took with
+        it a ballroom, a carousel, a fairground organ, four hundred coloured bulbs and the whole
+        of that season's prize stock. Nobody drowned. That is the only part of the story the
+        town likes to tell.</p>
+        <p>You are minding <b>Brindley's Amusements</b> on the promenade, out of season, in
+        November, because the man who owns it is not well and the man who owns it is your uncle.
+        The cabinets are dark. The shutters are down. It is the sort of quiet where you start
+        reading things you find under the counter &mdash; which is how you come across the
+        ledger, and the word in the flyleaf, and the note about <b>five prizes</b> that were
+        never redeemed.</p>
+        <p>The fair is still down there. It turns out you can get to it. Getting back is the
+        same trick in the opposite direction, and getting back <b>carrying something</b> is the
+        whole of the game.</p>
+        <p class="note">This is a full-sentence parser and there is no AI in it anywhere. Type
+        what you mean &mdash; LOOK UNDER THE MAT &middot; GIVE THE CHIPS TO THE GULLS &middot;
+        UNLOCK THE GREEN DOOR WITH THE KEYS. Type HELP for the verbs, ABOUT for where this came
+        from. There is no hint command. There is a bird.</p>
+      </div>
+      <div id="bootbtns">
+        <button class="btn" id="beginBtn">BEGIN</button>
+        <button class="btn" id="resumeBtn">CONTINUE SAVED GAME</button>
+        <a class="btn" href="../text-adventures.html">THE ARCHIVE</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="drownedfair.js?v=2026081504"></script>
+<script>
+"use strict";
+/* ============================================================
+   PRESENTATION LAYER
+   drownedfair.js is DOM-free. Everything here is chrome: the C64
+   screen, the auto-map, the compass and localStorage.
+   ============================================================ */
+const el = id => document.getElementById(id);
+const out = el('out'), cmd = el('cmd'), inbar = el('inbar');
+const SAVEKEY = 'drownedfair_save';
+
+/* ---- printing ---- */
+let pending = "";      /* the engine emits in fragments; flush on newline runs */
+function printer(text, style){
+  if(style === "sep"){
+    flushPending();
+    const d=document.createElement('div');
+    d.className='ln c-sep'; d.textContent='• • •';
+    out.appendChild(d);
+    return;
+  }
+  if(style === "head"){
+    flushPending();
+    const d=document.createElement('div');
+    d.className='ln para c-head'; d.textContent=text.replace(/\n+$/,'');
+    out.appendChild(d);
+    return;
+  }
+  pending += text;
+  if(/\n\s*$/.test(pending)) flushPending();
+}
+function flushPending(){
+  if(!pending) return;
+  const chunk = pending; pending = "";
+  chunk.split(/\n{2,}/).forEach(block=>{
+    const t = block.replace(/^\n+|\n+$/g,'');
+    if(!t) return;
+    const d=document.createElement('div');
+    d.className='ln para c-text';
+    d.textContent=t;
+    out.appendChild(d);
+  });
+}
+function scrollDown(){ out.scrollTop = out.scrollHeight; }
+
+/* ---- the auto-map ----
+   the engine only ever names rooms you have stood in, so this cannot
+   be read to solve the ghost-train maze in advance. */
+const DELTA = { north:[0,-1], south:[0,1], east:[1,0], west:[-1,0] };
+let MAP={}, CUR=null, START=null;
+
+function shortRoom(s){
+  s = String(s||'?').replace(/^The\s+/i,'');
+  const w = s.trim().split(/\s+/);
+  let t = (w.length>1 && (w[0].length+w[1].length)<=11) ? (w[0]+' '+w[1]) : w[0];
+  return t.slice(0,11).toUpperCase();
+}
+function roomScale(nm){
+  nm=(nm||'').toLowerCase();
+  if(/booth|hut|alcove|landing|prize wall|shed/.test(nm)) return 0;
+  if(/ballroom|cavern|colonnade|field|sea|sandbar|dunes|loft|arcade/.test(nm)) return 2;
+  return 1;
+}
+const MAP_W=[46,66,94], MAP_H=[26,34,52];
+
+function layout(){
+  const c={};
+  if(!START || !MAP[START]) return c;
+  c[START]=[0,0];
+  const q=[START], seen={}; seen[START]=1;
+  while(q.length){
+    const id=q.shift(), p=c[id], node=MAP[id];
+    if(!node) continue;
+    for(const dir in node.exits){
+      const dl=DELTA[dir], t=node.exits[dir];
+      if(!dl || !t || !MAP[t]) continue;
+      if(c[t]===undefined) c[t]=[p[0]+dl[0], p[1]+dl[1]];
+      if(!seen[t]){ seen[t]=1; q.push(t); }
+    }
+  }
+  /* rooms reached only by stairs, boat or the magic word get parked in a row
+     under everything else rather than vanishing off the map */
+  let maxy=0; for(const k in c) if(c[k][1]>maxy) maxy=c[k][1];
+  let spare=0;
+  for(const id in MAP) if(c[id]===undefined){ c[id]=[spare++, maxy+2]; }
+  return c;
+}
+
+function renderMap(){
+  const inner=el('mapinner'), c=layout(), ids=Object.keys(c);
+  if(!ids.length){ inner.innerHTML='<div class="mapempty">unmapped</div>'; inner.style.width=inner.style.height=''; return; }
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+  ids.forEach(id=>{ const[x,y]=c[id]; minx=Math.min(minx,x); miny=Math.min(miny,y); maxx=Math.max(maxx,x); maxy=Math.max(maxy,y); });
+  const STEP=100, HW=MAP_W[2]/2, HH=MAP_H[2]/2;
+  inner.innerHTML='';
+  inner.style.width=((maxx-minx)*STEP+MAP_W[2]+8)+'px';
+  inner.style.height=((maxy-miny)*STEP+MAP_H[2]+8)+'px';
+  const ctr=id=>{ const[x,y]=c[id]; return [(x-minx)*STEP+HW+4, (y-miny)*STEP+HH+4]; };
+
+  const drawn={};
+  ids.forEach(id=>{
+    const node=MAP[id]; if(!node) return;
+    for(const dir in node.exits){
+      const t=node.exits[dir];
+      if(!t || c[t]===undefined || !DELTA[dir]) continue;
+      const key=[id,t].sort().join('|'); if(drawn[key]) continue; drawn[key]=1;
+      const[ax,ay]=ctr(id), [bx,by]=ctr(t);
+      if(ax!==bx && ay!==by) continue;
+      const ln=document.createElement('div'); ln.className='mapedge';
+      ln.style.left=Math.min(ax,bx)+'px'; ln.style.top=Math.min(ay,by)+'px';
+      ln.style.width=Math.max(2,Math.abs(bx-ax))+'px';
+      ln.style.height=Math.max(2,Math.abs(by-ay))+'px';
+      inner.appendChild(ln);
+    }
+  });
+
+  ids.forEach(id=>{
+    const node=MAP[id]; if(!node) return;
+    const sc=roomScale(node.name), w=MAP_W[sc], h=MAP_H[sc];
+    const [cx,cy]=ctr(id);
+    const r=document.createElement('div');
+    r.className='maproom'+(id===CUR?' cur':'');
+    r.style.left=(cx-w/2)+'px'; r.style.top=(cy-h/2)+'px';
+    r.style.width=w+'px'; r.style.height=h+'px';
+    if(sc===0) r.style.fontSize='8.5px';
+    r.textContent=shortRoom(node.name);
+    let ud='';
+    for(const k in node.exits){ if(k==='up') ud+='↑'; if(k==='down') ud+='↓'; }
+    if(ud){ const b=document.createElement('span'); b.className='ud'; b.textContent=ud; r.appendChild(b); }
+    inner.appendChild(r);
+    if(id===CUR) setTimeout(()=>{ const v=el('mapview'); if(v){ v.scrollLeft=cx-v.clientWidth/2; v.scrollTop=cy-v.clientHeight/2; } },0);
+  });
+}
+
+/* click-drag panning */
+(function(){
+  const v=el('mapview'); if(!v) return;
+  let dragging=false,sx=0,sy=0,sl=0,st=0;
+  v.addEventListener('pointerdown',e=>{ dragging=true; v.classList.add('dragging');
+    sx=e.clientX; sy=e.clientY; sl=v.scrollLeft; st=v.scrollTop; v.setPointerCapture(e.pointerId); });
+  v.addEventListener('pointermove',e=>{ if(!dragging) return;
+    v.scrollLeft=sl-(e.clientX-sx); v.scrollTop=st-(e.clientY-sy); });
+  const end=()=>{ dragging=false; v.classList.remove('dragging'); };
+  v.addEventListener('pointerup',end); v.addEventListener('pointercancel',end);
+})();
+
+/* ---- the draggable divider between the story and the instruments ---- */
+(function(){
+  const KEY='drownedfair_railw', DEF=400, MIN_RAIL=240, MIN_OUT=300;
+  const bodyEl=el('body'), rail=el('rail'), split=el('split');
+  if(!bodyEl||!rail||!split) return;
+
+  function setRail(px, remember){
+    const room=bodyEl.clientWidth||window.innerWidth;
+    const max=Math.max(MIN_RAIL, room-MIN_OUT);
+    px=Math.min(Math.max(Math.round(px), MIN_RAIL), max);
+    rail.style.flex='0 0 '+px+'px';
+    if(remember!==false){ try{ localStorage.setItem(KEY, px); }catch(e){} }
+    return px;
+  }
+  let saved=0; try{ saved=parseInt(localStorage.getItem(KEY)||'0',10); }catch(e){}
+  if(saved>0) setRail(saved,false);
+
+  let dragging=false;
+  split.addEventListener('pointerdown',e=>{
+    dragging=true; split.classList.add('dragging');
+    split.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  split.addEventListener('pointermove',e=>{
+    if(!dragging) return;
+    const r=bodyEl.getBoundingClientRect();
+    setRail(r.right-e.clientX);
+    renderMap();
+  });
+  const stop=()=>{ dragging=false; split.classList.remove('dragging'); };
+  split.addEventListener('pointerup',stop);
+  split.addEventListener('pointercancel',stop);
+
+  split.addEventListener('dblclick',()=>{
+    try{ localStorage.removeItem(KEY); }catch(e){}
+    setRail(DEF,false); renderMap();
+  });
+  /* keyboard: the divider is focusable, so it has to move by key too */
+  split.addEventListener('keydown',e=>{
+    const step=e.shiftKey?40:10;
+    const cur=rail.getBoundingClientRect().width;
+    if(e.key==='ArrowLeft'){ setRail(cur+step); renderMap(); e.preventDefault(); }
+    else if(e.key==='ArrowRight'){ setRail(cur-step); renderMap(); e.preventDefault(); }
+    else if(e.key==='Home'){ setRail(DEF,false); renderMap(); e.preventDefault(); }
+  });
+  /* a narrower window must not leave the rail wider than the screen */
+  window.addEventListener('resize',()=>{ setRail(rail.getBoundingClientRect().width,false); });
+})();
+
+/* ---- the rail ---- */
+function status(s){
+  el('stTitle').textContent = s.roomTitle;
+  el('stScore').textContent = 'SCORE '+s.score+' / MOVES '+s.turns;
+
+  MAP = s.map || {};
+  CUR = s.roomId;
+  if(!START && MAP[s.roomId]) START = s.roomId;
+  if(START && !MAP[START]) START = s.roomId;
+  renderMap();
+
+  document.querySelectorAll('#compass .cp[data-d]').forEach(cell=>{
+    cell.classList.toggle('on', s.exits.indexOf(cell.getAttribute('data-d'))>=0);
+  });
+  el('stairUp').classList.toggle('on', s.exits.indexOf('up')>=0);
+  el('stairDn').classList.toggle('on', s.exits.indexOf('down')>=0);
+
+  const box=el('carrying');
+  box.innerHTML = s.carried.length
+    ? s.carried.map(n=>'<div class="it">- '+n.toLowerCase()+'</div>').join('')
+    : '<div class="dim">nothing</div>';
+
+  const cab=el('cabinet');
+  cab.innerHTML = s.stored
+    ? '<div class="it">'+s.stored+' of 5 prizes returned</div>'
+    : '<div class="dim">five ring-marks in the dust</div>';
+
+  const rk=el('rank');
+  rk.textContent = s.rank;
+  rk.className = s.score ? '' : 'dim';
+
+  el('scopeline').textContent = s.dark
+    ? 'You cannot see a thing. The map remembers, though.'
+    : (s.roomFlavor || 'A parser game. Whole sentences. No AI anywhere in it.');
+}
+
+/* ---- input ---- */
+function submit(line){
+  const d=document.createElement('div');
+  d.className='ln para c-cmd'; d.textContent='> '+line;
+  out.appendChild(d);
+  DF.turn(line);
+  flushPending();
+  scrollDown();
+}
+cmd.addEventListener('keydown', e=>{
+  if(e.key!=='Enter') return;
+  const v=cmd.value.trim();
+  cmd.value='';
+  if(v) submit(v);
+});
+document.querySelectorAll('#compass .cp[data-d], .stair[data-d]').forEach(c=>{
+  c.addEventListener('click',()=>{ if(c.classList.contains('on')) submit(c.getAttribute('data-d')); });
+});
+document.addEventListener('click', e=>{
+  if(el('boot').style.display==='none' && !e.target.closest('.btn') && !e.target.closest('#mapview')
+     && window.innerWidth>900) cmd.focus();
+});
+
+/* ---- save / load ---- */
+function sysline(t){
+  const d=document.createElement('div'); d.className='ln para c-sys'; d.textContent=t;
+  out.appendChild(d); scrollDown();
+}
+el('saveBtn').addEventListener('click',()=>{
+  if(el('boot').style.display!=='none') return;
+  try{ localStorage.setItem(SAVEKEY, JSON.stringify(DF.serialize())); sysline('Saved.'); }
+  catch(err){ sysline('The save failed: '+err.message); }
+});
+el('loadBtn').addEventListener('click',()=>{
+  let raw=null; try{ raw=localStorage.getItem(SAVEKEY); }catch(err){}
+  if(!raw){ sysline('There is no saved game.'); return; }
+  if(el('boot').style.display!=='none') start(true);
+  else { try{ DF.restore(JSON.parse(raw)); sysline('Restored.'); DF.turn('look'); flushPending(); scrollDown(); }
+         catch(err){ sysline('That save is unreadable.'); } }
+});
+el('fsBtn').addEventListener('click',()=>{
+  if(document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+});
+
+/* ---- boot ---- */
+function hasSave(){ try{ return !!localStorage.getItem(SAVEKEY); }catch(e){ return false; } }
+if(!hasSave()) el('resumeBtn').setAttribute('disabled','disabled');
+
+function start(resume){
+  el('boot').style.display='none';
+  inbar.style.display='flex';
+  DF.init({ print:printer, status:status });
+  let raw=null;
+  if(resume){ try{ raw=localStorage.getItem(SAVEKEY); }catch(e){} }
+  if(raw){
+    try{ DF.restore(JSON.parse(raw)); DF.turn('look'); }
+    catch(e){ DF.begin(); }
+  } else DF.begin();
+  flushPending();
+  scrollDown();
+  if(window.innerWidth>900) cmd.focus();
+}
+el('beginBtn').addEventListener('click',()=>start(false));
+el('resumeBtn').addEventListener('click',()=>{ if(hasSave()) start(true); });
+</script>
+</body>
+</html>
