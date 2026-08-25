@@ -195,6 +195,37 @@ notice; players who play one cabinet will not, and lose nothing.
 
 Write toward it, never about it.
 
+### The builders who were here first
+
+Some places in the valley were built by something else, a long time before
+anyone who could write about it. You will find them under things, not on top
+of them. The rule is that **you never explain them — you build them wrong and
+let the room say it.**
+
+What "wrong" means, concretely, and it is always structural:
+
+- Ceilings too low for the span of the room they cover.
+- Handholds set at heights no human reach makes sense of.
+- Ramps where people would have put stairs.
+- Doorways wider than they are tall.
+- Load-bearing everywhere, as though weight were the main problem being
+  solved.
+
+A player who notices works out that whatever built this was heavy, and was
+comfortable somewhere light. Nobody in the game ever says so. There is no
+codex entry, no journal, no voice explaining the biology — **if a room needs a
+paragraph to land, the room is built wrong.**
+
+Where people came later, they came *much* later, and they bolted onto what was
+already there rather than replacing it: cable runs stapled to older walls,
+stencilled warnings in a language the building predates, equipment installed
+by an institution that has since stopped existing. Two eras, always legible as
+two, never blended.
+
+The oldest things are frequently instruments. Something was measuring
+something down there. What it was measuring is not stated, and the last
+reading is usually still on the panel.
+
 ---
 
 ## 8. If you build something

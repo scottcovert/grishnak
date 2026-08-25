@@ -1388,7 +1388,7 @@ function drawCat(g,gh){
   GFX.shadow(g, p.x, p.y, 10*p.s, 0.26);
   const idx=Math.max(0, GHOST_DEF.indexOf(gh.def));
   const fr=gh.frightened && !th.cozy;           // a hearth cat is never hunted
-  const cast=castFor();
+  const cast=monsterCast();
   if(cast && cast.def.m && cast.def.m[idx]){
     /* Anchoring note (checked 2026-08-24 against Scott's "center on their
        squares"): the sprite is already bottom-CENTRE anchored on the tile's
@@ -1400,7 +1400,7 @@ function drawCat(g,gh){
        classic warning, told in paint instead of palette */
     const flash= fr && frightT<120 && (frame>>3)%2;
     const cells= (fr && !flash && cast.def.fm)? cast.def.fm[idx] : cast.def.m[idx];
-    if(drawCastCell(g,cells,p.x,p.y,p.s,(gh.dir.x||1)<0, fr && !cast.def.fm)) return;
+    if(drawCastCell(g,cast,cells,p.x,p.y,p.s,(gh.dir.x||1)<0, fr && !cast.def.fm)) return;
   }
   const body= fr? ((frightT<120 && (frame>>3)%2)? '#cdd6ea' : '#4a5a88')
     : th.cozy? CAT_COLS[idx] : gh.def.col;
@@ -1674,6 +1674,33 @@ function drawPellet(g,r,c){
    to the CELLAR CATS below — the rat and the four steel-eyed cats are the
    valley's default company. */
 const CASTS={};
+/* THE HOUSE CATS — the valley's default hunters, worn by every theme that
+   does not ship its own. Sheet order matches GHOST_DEF exactly (ember chases,
+   verdigris ambushes, iron flanks, bone wanders at half speed), so the paint
+   and the personality agree. Frozen-blue fright cells are tinted at pack time.
+   KEYING NOTE, learned here and worth keeping: verdigris is a GREEN cat on a
+   green screen. A hue test punches holes straight through her face; the
+   separator that works is BRIGHTNESS — the screen is g=177, every part of her
+   is g<=140 — plus flood-fill connectivity from the border. */
+const CAT_CAST={src:'images/waka-cast-cats.png?v=2026082404',
+ m:[
+  [{x:2,y:2,w:122,h:150,k:0.95},{x:126,y:2,w:124,h:150,k:0.95}],      // ember
+  [{x:376,y:2,w:121,h:150,k:0.95},{x:499,y:2,w:121,h:150,k:0.95}],    // verdigris
+  [{x:745,y:2,w:125,h:150,k:0.95},{x:872,y:2,w:125,h:150,k:0.95}],    // iron
+  [{x:1126,y:2,w:127,h:150,k:0.95},{x:1255,y:2,w:134,h:150,k:0.95}]   // bone
+ ],
+ fm:[[{x:252,y:2,w:122,h:150,k:0.95}],[{x:622,y:2,w:121,h:150,k:0.95}],
+     [{x:999,y:2,w:125,h:150,k:0.95}],[{x:1391,y:2,w:127,h:150,k:0.95}]]};
+/* THE BOY (Scott's head sheet, 2026-08-24) — the valley's player on the
+   CLASSIC screen, on trial against the rat that still runs every other theme.
+   Just a head, which is the honest form for a maze-chase: the original ghosts
+   were heads too, and a body at 30px is mush. Side pair walks (mirrored for
+   left), front pair when he comes down-screen, back of the head when he goes
+   up — so you can read his heading, which the rat could never tell you. */
+CASTS.classic={src:'images/waka-cast-classic.png?v=2026082403',
+  player:      [{x:2,y:2,w:133,h:150,k:1.05},{x:137,y:2,w:133,h:150,k:1.05}],
+  playerFront: [{x:272,y:2,w:134,h:150,k:1.05},{x:408,y:2,w:134,h:150,k:1.05}],
+  playerBack:  [{x:544,y:2,w:134,h:150,k:1.05}]};
 /* THE DESERT SET (Scott's sheets, 2026-08-23 — "realistic little shiny
    plastic toys"): HOUND chases, WRAP ambushes, SHELL flanks, DUST — a
    drifting storm — wanders at half speed. Personalities cast the toys. */
@@ -1691,16 +1718,34 @@ CASTS.egypt={src:'images/waka-cast-egypt.png?v=2026082310',
  fm:[[{x:377,y:2,w:177,h:140,k:1.3125}],[{x:736,y:2,w:87,h:140,k:1.375}],
      [{x:1316,y:2,w:242,h:140,k:0.775}],[{x:1781,y:2,w:104,h:140,k:1.1875}]]};
 const castImgs={};
+/* keyed by SRC, not by theme, so the house cats load ONCE and every theme
+   that falls back to them shares the same Image */
+function castImage(src){
+  let im=castImgs[src];
+  if(!im){ try{ im=new Image(); im.src=src; castImgs[src]=im; }catch(e){ return null; } }
+  return (im.complete && im.naturalWidth)? im : null;
+}
 function castFor(){
   const name=THEME_ORDER.find(k=>THEMES[k]===th);
   const c=name && CASTS[name];
   if(!c) return null;
-  let im=castImgs[name];
-  if(!im){ try{ im=new Image(); im.src=c.src; castImgs[name]=im; }catch(e){ return null; } }
-  return (im.complete && im.naturalWidth)? {img:im, def:c} : null;
+  const im=castImage(c.src);
+  return im? {img:im, def:c} : null;
 }
-function drawCastCell(g,cells,x,y,s,flip,fr){
-  const cast=castFor(); if(!cast) return false;
+/* THE HOUSE CATS (Scott, 2026-08-24: "implement the round cat heads as main
+   monsters across all non-bespoke levels"). A theme that ships its OWN
+   monsters keeps them — egypt's desert set is untouched — and everything else
+   now wears these four heads instead of the code-drawn cats. One sheet
+   re-dresses nine screens. The code cats stay as the last fallback, for a
+   browser that never loads the atlas. */
+function monsterCast(){
+  const c=castFor();
+  if(c && c.def.m) return c;                     // the theme brought its own
+  const im=castImage(CAT_CAST.src);
+  return im? {img:im, def:CAT_CAST} : null;
+}
+function drawCastCell(g,cast,cells,x,y,s,flip,fr){
+  if(!cast) return false;
   const use= fr && cast.def.fright && cast.def.fright.length? cast.def.fright : cells;
   const c=use[(frame>>4)%use.length];
   const SC=(30*(c.k||1)*s)/c.h, w=c.w*SC, h=c.h*SC;
@@ -1728,8 +1773,17 @@ function drawPac(g){
     g.fillStyle=gg; g.beginPath(); g.arc(p.x,y,R+16*jf,0,7); g.fill();
   }
   const cast=castFor();
-  if(cast && cast.def.player &&
-     drawCastCell(g,cast.def.player,p.x,p.y,p.s*(1+0.4*jf),pac.dir.x<0,false)) return;
+  if(cast && cast.def.player){
+    /* A HEAD can face the way it is going, which a mirrored side view cannot.
+       When the cast supplies playerFront/playerBack, a player travelling
+       DOWN-screen shows his face and one travelling UP shows the back of his
+       head; sideways still uses the side pair, mirrored. Casts without those
+       lists fall back to the side pair for everything, so this is additive. */
+    let cells=cast.def.player, flip=pac.dir.x<0;
+    if(!pac.dir.x && pac.dir.y>0 && cast.def.playerFront){ cells=cast.def.playerFront; flip=false; }
+    else if(!pac.dir.x && pac.dir.y<0 && cast.def.playerBack){ cells=cast.def.playerBack; flip=false; }
+    if(drawCastCell(g,cast,cells,p.x,p.y,p.s*(1+0.4*jf),flip,false)) return;
+  }
   /* THE RAT (Scott, 2026-08-23: "do cellar cats"). The wedge-mouthed disc is
      gone: the valley's player is a larder rat — quick, low, unglamorous, and
      exactly the thing four cellar cats would organise an evening around. */
@@ -2031,7 +2085,7 @@ window.HighMazeLayer={
        get camWY(){return camWY;},
        COLS, ROWS, TW, TH, WZ, D0, F, CAMH, CAM_MIN, CAM_MAX,
        MAZE, MAZE_EGYPT, MAZE_GROVE, MAZE_FOUNDRY, MAZE_CAUSEWAY,
-       THEMES, THEME_ORDER, HOUSE, DOOR, PEN, BONUS_TILE, CASTS, GHOST_DEF,
+       THEMES, THEME_ORDER, HOUSE, DOOR, PEN, BONUS_TILE, CASTS, CAT_CAST, GHOST_DEF,
        get pills(){return pills;}, get speedT(){return speedT;},
        tideFactor, tideHigh, TIDE_CYCLE,
        get lifts(){return lifts;}, get ride(){return ride;}, LIFT_Z, BOARD_T,

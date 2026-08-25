@@ -125,8 +125,18 @@ const MONO_SPEC=[
   {la: 0.50, lo:4.70, sc:1.0},
   {la:-0.85, lo:5.35, sc:1.4},
   {la: 0.05, lo:2.35, sc:1.2, n:3},            // the long ridge — three slabs wide
-  {la:-0.60, lo:0.20, sc:1.8},                 // the monster slab
+  {la:-0.60, lo:0.20, sc:1.8, wrong:true},     // the monster slab — AND THE DOOR
 ];
+/* --- THE WRONG SHADOW (2026-08-24) ---------------------------------------
+   Every other lane in this game is honest: tS is computed from the real sun
+   direction, and inShadow() tests the lane you can actually see drawn. That
+   consistency is the entire budget this one violation spends. THE MONSTER
+   SLAB's lane points somewhere no sun could put it, and it SHELTERS YOU
+   ANYWAY — it works, and it shouldn't, which is the tell. Three levels of
+   correct shadows teach the player to read lanes; this one then says
+   something. It is deliberately NOT a bug: see the test pin asserting the
+   bearing is wrong, so no future tidy-up "corrects" it into silence. */
+const WRONG_TURN=1.94;                         // radians off true. Not subtle, on purpose.
 const MONO=[];
 for(const sp of MONO_SPEC){
   const Q0=sph(sp.la,sp.lo), t0=dirT(Q0, vm(SUN_Q,-1)), p0=vn(vx(Q0,t0));
@@ -134,11 +144,29 @@ for(const sp of MONO_SPEC){
   for(let k=0;k<n;k++){
     const off=(k-(n-1)/2)*0.052*sp.sc*1.7;     // lanes overlap: one unbroken wall
     const Q= n>1? vn(vam(Q0,p0,off)) : Q0;
-    MONO.push({ Q, tS:dirT(Q, vm(SUN_Q,-1)), sc:sp.sc,
+    let tS=dirT(Q, vm(SUN_Q,-1));
+    if(sp.wrong){                              // spin the lane about the surface normal
+      const c=Math.cos(WRONG_TURN), s=Math.sin(WRONG_TURN);
+      tS=vn(vam(vm(tS,c), vx(Q,tS), s));
+    }
+    MONO.push({ Q, tS, sc:sp.sc, wrong:!!sp.wrong,
                 sh:MONO_SHADOW*(0.5+0.5*sp.sc),
                 hw:0.052*sp.sc, bl:0.020*sp.sc });
   }
 }
+const WRONG=MONO.find(m=>m.wrong);
+/* THE SHAFT sits at the far end of the lane that should not exist. Until
+   level 4 it is closed and the ground there is merely wrong; from level 4
+   it is open, and it is the only thing left to walk to. */
+/* 0.45 down the lane, not the far end. ROCKS_LL[7] lies alongside this whole
+   lane, and at the far end it sits INSIDE the shaft — where its 0.026 block
+   radius would have fenced the player off from their own entrance. Mid-lane
+   clears both the boulder and the slab's own block radius with a walking
+   step to spare, and it reads better anyway: a hole in the middle of the
+   impossible shadow, the slab at one end, the boulder at its shoulder. */
+const SHAFT_F=0.45;
+const SHAFT_Q=vn(vam(vm(WRONG.Q,Math.cos(WRONG.sh*SHAFT_F)), WRONG.tS, Math.sin(WRONG.sh*SHAFT_F)));
+const SHAFT_R=0.042, DESCEND_LV=4;
 const CRATER_HIDE=cr=>cr.w/R*0.8;             // a crater shelters inside ~80% of its rim
 /* --- CARGO PODS (Scott 2026-08-12): crashed cargo hauled home for O2
    + score. Carrying KILLS the jump — your meteor dodge — and slows the
@@ -222,6 +250,42 @@ let flareMode=0, flareT=FLARE_EVERY;  // 0 quiet · 1 warning · 2 FLARE
 let pods=[], carrying=-1;
 let level=1, dropT=0;                 // dropT: the diamond-drop curtain-up
 let aliens=[], alienT=0, tracks=[];
+/* THE BOUND (2026-08-24). Apollo crews stopped walking within minutes and
+   loped, because in one-sixth gravity a chain of low hops beats a stride.
+   Re-hop within BND_WIN frames of landing and the chain builds; miss the
+   beat and it drops to nothing. Airborne speed is 1.15 x bnd, so a clean
+   bounder covers roughly twice the ground of a walker for about a third
+   more air — worth doing, never free. Carrying cargo kills the jump, so
+   it also kills the bound: that is the cost of the pods made physical. */
+const BND_MAX=1.9, BND_STEP=0.14, BND_WIN=16;
+let bnd=1, bndT=99;                   // bndT: frames since you last touched down
+/* THE STATIC (Scott, 2026-08-24). Charge accrues on the suit in sunlight —
+   slowly always, fast under a flare — and bleeds off in shadow. Scott's
+   word was "per round", so it does NOT reset at a level boundary: a sloppy
+   level 2 is still on your suit in level 3. Full charge DISCHARGES, and
+   what it costs you is the radar, not blood. */
+const STAT_MAX=100, STAT_BLIND=420;
+let stat=0, statBlind=0, statMsgT=0;
+/* HUNTED WHEN LOADED (2026-08-24). Assessors want diamonds. Once diamonds
+   are in your hands, your hands are where the diamonds are. They still
+   never touch you — canon holds — they take a stone back out of the bag.
+   ALIEN_SPD is 0.0042 against a 0.0052 walk, so you can outrun one; you
+   CANNOT outrun one while carrying a pod at 0.80 speed. That trade was
+   already sitting in the numbers before this existed. */
+const HUNT_LOCK=150, HUNT_NEAR=0.05, HUNT_BREAK=0.095;
+/* --- THE PHASE SHIFT (Scott, 2026-08-24) ---------------------------------
+   Levels 1-3 are the moon as it has always been, and each one leans a
+   little harder on the same thread: the slab whose shadow is wrong. The
+   hints are placed AT the thing, never in the HUD, so the player is being
+   taught to look rather than told to go. Level 4 stops being a lap: the
+   diamonds do not come back, the ceremony has nothing to receive, and the
+   only object left on the map is the shaft. That IS the doozy. */
+let hintedLv=0, shaftMsgT=0, descT=0, descended=false;
+const SHAFT_HINTS={
+  1:'The big slab throws its shadow the wrong way. You look at the sun, then back at it. It has not moved.',
+  2:'The ground inside the wrong shadow gives, very slightly, and springs back. It is not solid down there.',
+  3:'Something under the wrong shadow answers your bootfall. Twice. The second one is not an echo.'
+};
 
 /* move along the great circle you face; heading is carried with you */
 function advance(a){
@@ -259,6 +323,8 @@ function reset(){
   plantT=0; flagUp=0; doneT=0; over=false; deadT=0;
   introT=90; jumpLatch=true; parts=[]; prints=[]; printC=0; homeMsgT=0; hintT=540;
   flareMode=0; flareT=FLARE_EVERY;
+  bnd=1; bndT=99; stat=0; statBlind=0; statMsgT=0;
+  hintedLv=0; shaftMsgT=0; descT=0; descended=false;
   pods=PODS_LL.map(([la,lo])=>({Q:sph(la,lo), home:false})); carrying=-1;
   level=1; dropT=0; aliens=[]; alienT=0; tracks=[];
   for(const h of HARV) h.ph=h.ph0;
@@ -318,19 +384,38 @@ function stepToward(Q,tgt,spd){
   const t=dirT(Q,tgt), a=Math.min(spd,d);
   return vn(vam(vm(Q,Math.cos(a)),t,Math.sin(a)));
 }
+/* How likely a new Assessor comes for YOU instead of a stone on the ground.
+   Empty-handed you are of no interest; holding all twelve you are the most
+   interesting thing on the moon. This is the same instinct as the meteor
+   clock — risk rises with what you stand to lose — and it is what turns the
+   walk home from a victory lap into the tense part of the run. */
+const huntChance=()=> stonesGot()/STONE_N*0.85;
+
 function spawnAlien(tgtIdx){
   let tgt=tgtIdx;
-  if(tgt===undefined){
+  const hunting = tgtIdx===undefined && stonesGot()>0 && Math.random()<huntChance();
+  if(!hunting && tgt===undefined){
     const open=stones.map((s,i)=>(!s.got&&!(s.away>0)&&!(s.fall>0))?i:-1).filter(i=>i>=0);
-    if(!open.length) return;
-    tgt=open[(Math.random()*open.length)|0];
-  }
+    if(!open.length){
+      if(stonesGot()===0) return;               // nothing on the ground, nothing in hand
+      tgt=-1;                                   // everything is in your hands, so: you
+    } else tgt=open[(Math.random()*open.length)|0];
+  } else if(hunting) tgt=-1;
   let Q=null;
   for(let k=0;k<24 && !Q;k++){                 // beyond the horizon, please
     const c=sph((Math.random()*2-1)*1.1, Math.random()*TAU);
     if(ad(c,P)>1.25) Q=c;
   }
-  aliens.push({Q:Q||vm(P,-1), st:'seek', tgt, t:0, hov:46, carry:false});
+  aliens.push({Q:Q||vm(P,-1), st: tgt<0? 'hunt':'seek', tgt, t:0, hov:46, carry:false});
+}
+/* it takes a diamond back OUT of your hands and drops it somewhere else */
+function loseStone(){
+  const held=stones.map((s,i)=>s.got?i:-1).filter(i=>i>=0);
+  if(!held.length) return false;
+  const s=stones[held[(Math.random()*held.length)|0]];
+  s.got=false; s.away=ALIEN_AWAY;
+  score=Math.max(0,score-100);
+  return true;
 }
 function burst(x,y,col,n){
   for(let i=0;i<n;i++) parts.push({x,y,vx:(Math.random()-.5)*2.4,
@@ -366,11 +451,20 @@ function update(){
         saveGame && saveGame();
       }
       level++; plantT=0; flagUp=0; dropT=170;
-      respawnStones();
       tanks=TANKS_LL.map(([la,lo])=>({Q:sph(la,lo), got:false}));
       aliens=[]; alienT=120;
-      if(level===2) toast('The sky flickers. Something has noticed the diamonds. It does not introduce itself.');
-      else toast('LEVEL '+level+' — the stones return. The moon is less patient now.');
+      if(level>=DESCEND_LV){
+        /* THE PHASE SHIFT. The diamonds do NOT come back. Three rounds of
+           fetch-and-carry end here, and the moon has exactly one thing left
+           on it. Everything that can still kill you still runs. */
+        stones.forEach(s=>{ s.got=true; s.away=0; s.fall=0; });
+        toast('The stones do not come back. The wrong shadow is open.');
+      } else {
+        respawnStones();
+        if(level===2) toast('The sky flickers. Something has noticed the diamonds. It does not introduce itself.');
+        else if(level===3) toast('LEVEL 3 — the stones return. Under the wrong shadow, something is keeping count.');
+        else toast('LEVEL '+level+' — the stones return. The moon is less patient now.');
+      }
     }
     return;
   }
@@ -401,7 +495,7 @@ function update(){
                     MONO.some(m=>ad(aheadP,m.Q)<m.bl) ||
                     HARV.some(h=>ad(aheadP,harvQ(h))<HARV_BLOCK);
     if(!blocked){
-      advance(dir*W_SPD*(dir<0?BACK_MUL:1)*(z>0?1.15:1)*(carrying>=0?POD_SPD:1));
+      advance(dir*W_SPD*(dir<0?BACK_MUL:1)*(z>0?1.15*bnd:1)*(carrying>=0?POD_SPD:1));
       walking=true; backing=dir<0; walkT+=1;
       if(z===0 && walkT%9===0){                     // footprints, world-fixed
         const right=vx(H,P);
@@ -425,6 +519,13 @@ function update(){
         sfx.task && sfx.task();
         toast('Cargo set down.');
       } else {
+        /* THE BOUND: hop again inside the window and the chain builds.
+           The WINDOW decides build-or-reset; the cap only clamps the value.
+           Testing `bnd<BND_MAX` in the condition instead made a chain
+           collapse to 1 on the very hop after it maxed — a perfect run
+           punished at the exact moment it was earned. */
+        bnd = (bndT<=BND_WIN)? Math.min(BND_MAX, bnd+BND_STEP) : 1;
+        bndT=99;
         z=0.01; vz=JUMP_V; o2=Math.max(0,o2-O2_JUMP);
         sfx.jump? sfx.jump() : (sfx.task&&sfx.task());
       }
@@ -432,7 +533,11 @@ function update(){
   } else jumpLatch=false;
   if(z>0 || vz>0){
     z+=vz; vz-=GRAV;
-    if(z<=0){ z=0; vz=0; burst(CXS, SURF_Y+2, '#d8dce4', 4); }
+    if(z<=0){ z=0; vz=0; bndT=0;      // touchdown — the window opens here
+      burst(CXS, SURF_Y+2, '#d8dce4', 4); }
+  } else if(bndT<99){
+    // grounded: the window is closing. Miss it and the chain is gone.
+    if(++bndT>BND_WIN){ bndT=99; bnd=1; }
   }
 
   // breathing — thirstier every level, and the reserve bottle is SMALL now
@@ -479,6 +584,40 @@ function update(){
                 : 'All cargo recovered — +'+POD_SCORE+'. The manifest is clean.');
     }
     if(stonesGot()===STONE_N && plantT===0){ plantT=1; sfx.chest && sfx.chest(); }
+  }
+
+  /* --- THE WRONG SHADOW: one thread, running through every round ---------
+     The hints live AT the slab, never in the HUD, and only fire if you go
+     and stand in the lane. A player who never looks gets told nothing —
+     which is the point. One per level, escalating. */
+  if(shaftMsgT>0) shaftMsgT--;
+  { const dW=ad(P,SHAFT_Q);
+    if(level<DESCEND_LV){
+      if(dW<0.075 && hintedLv<level && SHAFT_HINTS[level]){
+        hintedLv=level; toast(SHAFT_HINTS[level]); sfx.mine && sfx.mine();
+      }
+    } else if(!descended){
+      if(dW<SHAFT_R && z===0){                 // you have to be ON the ground to fall in
+        descended=true; descT=1; sfx.chest && sfx.chest();
+      } else if(dW<0.17 && shaftMsgT===0){
+        shaftMsgT=600; toast('The hole goes down further than the light does.');
+      }
+    }
+  }
+  if(descT>0){
+    /* going down. The moon stops mattering — nothing up here can reach you
+       now, so no hazard ticks while the descent plays. */
+    descT++;
+    if(descT===150){
+      score+=2000;
+      if(!flags.moonwalkDeep){
+        flags.moonwalkDeep=true;
+        res.gold=Math.min(999,res.gold+80);
+        saveGame && saveGame();
+      }
+      over=false; doneT=220;
+    }
+    return;
   }
 
   // meteors — telegraphed, then a ground blast. Airborne = safe.
@@ -531,10 +670,52 @@ function update(){
   for(let i=aliens.length-1;i>=0;i--){
     const a=aliens[i];
     const tgtS=stones[a.tgt];
+    if(a.st==='hunt'){
+      /* it comes for the diamonds in your hands. Empty them — by getting
+         home — and it loses interest entirely. */
+      if(stonesGot()===0){ a.st='flee'; a.t=160; continue; }
+      a.Q=stepToward(a.Q, P, ALIEN_SPD);
+      if(ad(a.Q,P)<HUNT_NEAR){
+        a.st='lift'; a.t=HUNT_LOCK;
+        if(!a.warned){ a.warned=true; toast('A light comes down over you. It is not interested in the ground.'); }
+      }
+      continue;
+    }
+    if(a.st==='lift'){
+      /* THE ESCAPES: empty your hands, outrun it, or reach the lander.
+         In the lock it tracks at full ALIEN_SPD (0.00420) against a laden
+         walk of W_SPD*POD_SPD (0.00416) — so hauling a pod means it gains
+         on you, slowly, and cannot be shaken except by going home. Unladen
+         you walk 0.00520 and leave it behind comfortably. That knife-edge
+         is the pod's real price, and this is the only place it shows up. */
+      if(stonesGot()===0){ a.st='flee'; a.t=160; continue; }
+      if(ad(P,LANDER_Q)<0.08){
+        a.st='flee'; a.t=160;
+        toast('The lander’s hull breaks the beam. It withdraws.');
+        sfx.mine && sfx.mine();
+      } else if(ad(a.Q,P)>HUNT_BREAK){
+        a.st='hunt';                      // you broke away — it follows again
+      } else if(--a.t<=0){
+        if(loseStone()){
+          sfx.denied && sfx.denied();
+          burst(CXS, SURF_Y-z*ZS-20, '#c9b5ff', 12);
+          toast('It takes a diamond out of your hands. It will land somewhere.');
+        }
+        a.st='flee'; a.t=160; a.carry=true;
+      } else {
+        a.Q=stepToward(a.Q, P, ALIEN_SPD);
+      }
+      continue;
+    }
     if(a.st==='seek'){
       if(!tgtS || tgtS.got || tgtS.away>0 || tgtS.fall>0){
         const open=stones.map((s,j)=>(!s.got&&!(s.away>0)&&!(s.fall>0))?j:-1).filter(j=>j>=0);
-        if(!open.length){ a.st='flee'; a.t=160; continue; }
+        if(!open.length){
+          /* the ground is bare. If you cleared it, the diamonds did not
+             stop existing — they moved into your hands, and so does it. */
+          if(stonesGot()>0){ a.st='hunt'; a.tgt=-1; continue; }
+          a.st='flee'; a.t=160; continue;
+        }
         a.tgt=open[(Math.random()*open.length)|0]; continue;
       }
       a.Q=stepToward(a.Q, tgtS.Q, ALIEN_SPD);
@@ -558,6 +739,7 @@ function update(){
     }
   }
 
+  const shaded=inShadow();            // asked once — the static and the flare share the answer
   // the solar flare clock: quiet -> radio warning -> hard radiation
   if(flareMode===0){
     if(--flareT<=0){
@@ -568,12 +750,38 @@ function update(){
   } else if(flareMode===1){
     if(--flareT<=0){ flareMode=2; flareT=FLARE_LEN; sfx.explode && sfx.explode(); }
   } else {
-    if(!inShadow()){
+    if(!shaded){
       hurt();                            // iframes throttle this to ~1 heart/1.5s
       if(frame%5===0) parts.push({x:CXS+(Math.random()-.5)*30, y:SURF_Y-z*ZS-40,
         vx:(Math.random()-.5)*1.4, vy:1.6+Math.random(), life:10+Math.random()*8, col:'#ffd76e'});
     }
     if(--flareT<=0){ flareMode=0; flareT=FLARE_EVERY; toast('The flare passes. The suit ticks as it cools.'); }
+  }
+
+  /* --- THE STATIC --- charge in the light, bleed in the dark. Note this
+     runs OUTSIDE the flare branches on purpose: sunlight always charges
+     you a little, so the meter is alive between flares instead of being
+     furniture nine tenths of the time. Deliberately NOT reset on level-up. */
+  if(statBlind>0) statBlind--;
+  if(statMsgT>0) statMsgT--;
+  if(shaded) stat=Math.max(0, stat-0.25);
+  else stat=Math.min(STAT_MAX, stat + (flareMode===2? 0.34 : flareMode===1? 0.12 : 0.018));
+  if(stat>=STAT_MAX){
+    /* DISCHARGE. It costs you the radar, not blood — unless you are
+       standing next to something conductive, in which case the charge
+       goes THROUGH you to reach it. Sheltering at the lander during a
+       flare is still right; sheltering there at 99% static is not. */
+    stat=22; statBlind=STAT_BLIND;
+    sfx.explode && sfx.explode();
+    burst(CXS, SURF_Y-z*ZS-30, '#bfe8ff', 14);
+    burst(CXS, SURF_Y-z*ZS-30, '#eef0f6', 8);
+    const metal = ad(P,LANDER_Q)<0.10 || carrying>=0 ||
+                  HARV.some(h=>ad(P,harvQ(h))<0.07) ||
+                  pods.some(pd=>!pd.home && ad(P,pd.Q)<0.06);
+    if(metal){ hurt(); toast('The charge finds metal and goes through you to reach it. Radar is dead.'); }
+    else toast('The suit discharges into the regolith. Radar is dead until it settles.');
+  } else if(stat>78 && statMsgT===0 && statBlind===0){
+    statMsgT=420; toast('The suit is buzzing. Get into shadow.');
   }
 
   for(let i=scorches.length-1;i>=0;i--) if(--scorches[i].t<=0) scorches.splice(i,1);
@@ -798,6 +1006,30 @@ function drawGround(g){
     g.fillStyle='rgba(255,140,60,'+(Math.min(1,sc.t/120)*0.5*(0.5+0.5*Math.sin(frame*0.3))).toFixed(2)+')';
     g.beginPath(); g.ellipse(p.x,p.y+0.5*p.s,6*p.s,2.2*p.s,0,0,7); g.fill();
     g.globalAlpha=1;
+  }
+  /* THE SHAFT — a ground feature, not an object, so it paints with the
+     craters and scorches rather than sorting against them. Before the
+     phase shift it is only a seam: visible if you go and stand there,
+     meaningless if you never do. After, it is open and it is lit. */
+  if(vd(SHAFT_Q,P)>=CULL_FEAT){
+    const p=toCam(SHAFT_Q,0);
+    if(p){
+      const rx=SHAFT_R*R*1.15*p.s, ry=rx*0.36;
+      if(level<DESCEND_LV){
+        g.strokeStyle='rgba(58,56,78,.6)'; g.lineWidth=1.4*p.s;
+        g.beginPath(); g.ellipse(p.x,p.y,rx,ry,0,0,7); g.stroke();
+      } else {
+        const gr=g.createRadialGradient(p.x,p.y,1,p.x,p.y,Math.max(2,rx));
+        gr.addColorStop(0,'#000000'); gr.addColorStop(0.7,'#05030c'); gr.addColorStop(1,'#171028');
+        g.fillStyle=gr;
+        g.beginPath(); g.ellipse(p.x,p.y,rx,ry,0,0,7); g.fill();
+        g.strokeStyle='#241c3a'; g.lineWidth=2.2*p.s;
+        g.beginPath(); g.ellipse(p.x,p.y,rx,ry,0,0,7); g.stroke();
+        g.strokeStyle='rgba(191,232,255,'+(0.30+0.26*Math.sin(frame*0.06)).toFixed(2)+')';
+        g.lineWidth=1.5*p.s;
+        g.beginPath(); g.ellipse(p.x,p.y-ry*0.16,rx*0.8,ry*0.68,0,0,7); g.stroke();
+      }
+    }
   }
 }
 
@@ -1025,51 +1257,124 @@ function drawTank(g,p){
   g.fillText('O2',0,-4.5);
   g.restore();
 }
+/* THE LANDER, twice the size and built like a real one (2026-08-24).
+   Two stages now: a boxy panelled DESCENT stage standing on four splayed
+   legs with footpads, and the tapered ASCENT hull above it. The single
+   bullet-with-fins is gone — at this size fins read as decoration, so the
+   detail budget went into things that say "vehicle": panel seams, a
+   thermal band, an engine bell, a hatch with a ladder down the front,
+   RCS quads at the shoulders, a dish, and a beacon that blinks.
+   Origin (0,0) is still ground contact; the flare-shelter ring is left at
+   its old radius on purpose — the safe zone is 0.085 rad of GROUND and
+   must not appear to grow just because the art did. */
 function drawLander(g,p){
   g.save(); g.translate(p.x,p.y); g.scale(p.s,p.s);
+  const ink='#241c3a';
   // recovered cargo, stacked beside the legs — the manifest made visible
   { const home=pods.filter(p2=>p2.home).length;
     for(let i=0;i<home;i++){
-      const cy2=-i*11;
+      const cy2=-i*20;
       g.fillStyle= i%2? '#c6cad4':'#d8dce4';
-      g.beginPath(); g.roundRect? g.roundRect(-38,cy2-10,16,10,2) : g.rect(-38,cy2-10,16,10); g.fill();
-      g.strokeStyle='#241c3a'; g.lineWidth=1.4; g.stroke();
-      g.fillStyle='#ff7a1a'; g.fillRect(-38,cy2-7.6,16,2);
+      g.beginPath(); g.roundRect? g.roundRect(-62,cy2-19,26,19,3) : g.rect(-62,cy2-19,26,19); g.fill();
+      g.strokeStyle=ink; g.lineWidth=1.8; g.stroke();
+      g.fillStyle='#ff7a1a'; g.fillRect(-62,cy2-14,26,3.4);
+      g.fillStyle='rgba(36,28,58,.3)'; g.fillRect(-57,cy2-8,8,4);
     }
   }
-  // legs
-  g.strokeStyle='#241c3a'; g.lineWidth=2.4;
-  g.beginPath(); g.moveTo(-10,0); g.lineTo(-16,2); g.moveTo(10,0); g.lineTo(16,2); g.stroke();
-  // body
-  const lg=g.createLinearGradient(-12,-44,12,0);
-  lg.addColorStop(0,'#f2f4f8'); lg.addColorStop(1,'#c6cad4');
+  // --- four splayed legs. Back pair thinner and shorter: cheap depth. ---
+  const leg=(x0,y0,x1,y1,w,pad)=>{
+    g.lineCap='round';
+    g.strokeStyle=ink; g.lineWidth=w;
+    g.beginPath(); g.moveTo(x0,y0); g.lineTo(x1,y1); g.stroke();
+    g.strokeStyle='#c6cad4'; g.lineWidth=w*0.42;
+    g.beginPath(); g.moveTo(x0,y0); g.lineTo(x1,y1); g.stroke();
+    g.fillStyle='#d8dce4';
+    g.beginPath(); g.ellipse(x1,y1,pad,pad*0.42,0,0,7); g.fill();
+    g.strokeStyle=ink; g.lineWidth=1.5; g.stroke();
+  };
+  leg(-13,-32,-25,-10, 3.0, 5.5);            // back left
+  leg( 13,-32, 25,-10, 3.0, 5.5);            // back right
+  leg(-17,-30,-35,  0, 4.2, 8.5);            // front left
+  leg( 17,-30, 35,  0, 4.2, 8.5);            // front right
+
+  // --- DESCENT STAGE: the octagonal box that stays behind ---
+  const dg=g.createLinearGradient(-24,-36,24,-6);
+  dg.addColorStop(0,'#e8ebf1'); dg.addColorStop(1,'#b6bac6');
+  g.fillStyle=dg;
+  g.beginPath();
+  g.moveTo(-24,-11); g.lineTo(-24,-30); g.lineTo(-17,-36); g.lineTo(17,-36);
+  g.lineTo(24,-30); g.lineTo(24,-11); g.lineTo(17,-6); g.lineTo(-17,-6);
+  g.closePath(); g.fill();
+  g.strokeStyle=ink; g.lineWidth=2.2; g.stroke();
+  g.strokeStyle='rgba(36,28,58,.32)'; g.lineWidth=1.2;      // panel seams
+  g.beginPath(); g.moveTo(-9,-35); g.lineTo(-9,-6.5); g.moveTo(9,-35); g.lineTo(9,-6.5); g.stroke();
+  g.fillStyle='#ff7a1a'; g.fillRect(-24,-24,48,4.6);        // thermal band
+  g.fillStyle='rgba(36,28,58,.25)'; g.fillRect(-24,-24,48,1.4);
+  // the engine bell, tucked under
+  g.fillStyle='#8e94a4';
+  g.beginPath(); g.moveTo(-7,-6); g.lineTo(-11,0); g.lineTo(11,0); g.lineTo(7,-6);
+  g.closePath(); g.fill();
+  g.strokeStyle=ink; g.lineWidth=1.8; g.stroke();
+  g.fillStyle='rgba(36,28,58,.45)';
+  g.beginPath(); g.ellipse(0,0,11,2.4,0,0,7); g.fill();
+
+  // --- ASCENT STAGE: the tapered hull ---
+  const lg=g.createLinearGradient(-22,-88,22,-34);
+  lg.addColorStop(0,'#f6f8fb'); lg.addColorStop(0.55,'#dfe3ea'); lg.addColorStop(1,'#b6bac6');
   g.fillStyle=lg;
   g.beginPath();
-  g.moveTo(-11,0); g.lineTo(-11,-26); g.quadraticCurveTo(0,-46,11,-26); g.lineTo(11,0);
+  g.moveTo(-20,-34); g.lineTo(-20,-58); g.quadraticCurveTo(0,-94,20,-58); g.lineTo(20,-34);
   g.closePath(); g.fill();
-  g.strokeStyle='#241c3a'; g.lineWidth=2; g.stroke();
-  g.fillStyle='#ff7a1a';                     // fins
-  g.beginPath(); g.moveTo(-11,-4); g.lineTo(-18,4); g.lineTo(-11,4); g.closePath(); g.fill();
-  g.beginPath(); g.moveTo(11,-4); g.lineTo(18,4); g.lineTo(11,4); g.closePath(); g.fill();
-  g.strokeStyle='#241c3a'; g.lineWidth=1.6;
-  g.beginPath(); g.moveTo(-11,-4); g.lineTo(-18,4); g.lineTo(-11,4); g.closePath(); g.stroke();
-  g.beginPath(); g.moveTo(11,-4); g.lineTo(18,4); g.lineTo(11,4); g.closePath(); g.stroke();
-  g.fillStyle='#2a3450';                     // porthole
-  g.beginPath(); g.arc(0,-26,5.4,0,7); g.fill();
-  g.strokeStyle='#ff9a3c'; g.lineWidth=1.8;
-  g.beginPath(); g.arc(0,-26,5.4,0,7); g.stroke();
-  g.fillStyle='rgba(160,220,255,.7)'; g.fillRect(-3,-29.5,3,3);
+  g.strokeStyle=ink; g.lineWidth=2.4; g.stroke();
+  g.strokeStyle='rgba(36,28,58,.26)'; g.lineWidth=1.2;      // hull seams
+  g.beginPath(); g.moveTo(-20,-45); g.lineTo(20,-45); g.moveTo(-19.5,-58); g.lineTo(19.5,-58); g.stroke();
+  // RCS quads at the shoulders
+  const rcs=(x,y,dx)=>{
+    g.fillStyle='#8e94a4';
+    g.beginPath(); g.moveTo(x,y-3.4); g.lineTo(x+dx*8,y-5.2); g.lineTo(x+dx*8,y+1.4); g.lineTo(x,y+3.4);
+    g.closePath(); g.fill(); g.strokeStyle=ink; g.lineWidth=1.4; g.stroke();
+  };
+  rcs(-19.6,-55,-1); rcs(19.6,-55,1);
+  // hatch, and the ladder down the front of the descent stage
+  g.fillStyle='#aeb4c2';
+  g.beginPath(); g.roundRect? g.roundRect(-7.5,-44,15,10,2.5) : g.rect(-7.5,-44,15,10); g.fill();
+  g.strokeStyle=ink; g.lineWidth=1.6; g.stroke();
+  g.strokeStyle='#d8dce4'; g.lineWidth=1.7;
+  g.beginPath(); g.moveTo(-4.5,-33); g.lineTo(-4.5,-9); g.moveTo(4.5,-33); g.lineTo(4.5,-9); g.stroke();
+  g.strokeStyle='rgba(36,28,58,.55)'; g.lineWidth=1.1;
+  for(let i=0;i<5;i++){ const ry=-31.5+i*5.4;
+    g.beginPath(); g.moveTo(-4.5,ry); g.lineTo(4.5,ry); g.stroke(); }
+  // porthole
+  g.fillStyle='#2a3450';
+  g.beginPath(); g.arc(0,-63,10.8,0,7); g.fill();
+  g.strokeStyle='#ff9a3c'; g.lineWidth=2.6;
+  g.beginPath(); g.arc(0,-63,10.8,0,7); g.stroke();
+  g.fillStyle='rgba(160,220,255,.7)'; g.fillRect(-6.5,-70,6,6);
+  // the dish, canted the way a dish always is
+  g.strokeStyle=ink; g.lineWidth=1.8; g.lineCap='round';
+  g.beginPath(); g.moveTo(14,-71); g.lineTo(21,-79); g.stroke();
+  g.fillStyle='#eef0f6';
+  g.beginPath(); g.ellipse(22.5,-81,7,4.4,-0.5,0,7); g.fill();
+  g.strokeStyle=ink; g.lineWidth=1.5; g.stroke();
+  // the beacon — the one moving light on a dead world
+  if((frame>>4)%2){
+    g.fillStyle='rgba(255,122,26,.35)';
+    g.beginPath(); g.arc(0,-79,7,0,7); g.fill();
+    g.fillStyle='#ff7a1a';
+    g.beginPath(); g.arc(0,-79,3.2,0,7); g.fill();
+  }
+
   // the flagpole — the flag climbs it during the ceremony
-  g.strokeStyle='#d8dce4'; g.lineWidth=2.2; g.lineCap='round';
-  g.beginPath(); g.moveTo(24,0); g.lineTo(24,-40); g.stroke();
-  const fy=-8-flagUp*28;
-  const wav=Math.sin(frame*0.12)*2.2;
+  g.strokeStyle='#d8dce4'; g.lineWidth=3.2; g.lineCap='round';
+  g.beginPath(); g.moveTo(48,0); g.lineTo(48,-80); g.stroke();
+  const fy=-16-flagUp*56;
+  const wav=Math.sin(frame*0.12)*4.4;
   g.fillStyle= flagUp>=1? '#ff7a1a' : '#eef0f6';
   g.beginPath();
-  g.moveTo(25,fy); g.quadraticCurveTo(36,fy+2+wav,44,fy+1+wav);
-  g.lineTo(44,fy+9+wav); g.quadraticCurveTo(35,fy+10+wav,25,fy+8);
+  g.moveTo(50,fy); g.quadraticCurveTo(72,fy+4+wav,88,fy+2+wav);
+  g.lineTo(88,fy+18+wav); g.quadraticCurveTo(70,fy+20+wav,50,fy+16);
   g.closePath(); g.fill();
-  g.strokeStyle='#241c3a'; g.lineWidth=1.5; g.stroke();
+  g.strokeStyle=ink; g.lineWidth=2; g.stroke();
   g.restore();
 }
 /* an ASSESSOR: a pale glass light. No face, no ship, no explanation. */
@@ -1282,13 +1587,38 @@ function drawPlayer(g){
    An object at angular distance d, bearing b from your heading
    plots at radius d/π — the far pole is the rim. */
 function drawMiniMap(g){
-  const cx=RW-44, cy=HUD+50, r=24;
+  /* 50% bigger, 2026-08-24 — and still a CIRCLE on purpose. This is an
+     azimuthal-equidistant plot: distance from the centre IS distance across
+     the moon, in every direction equally. Stretch it wider than tall and a
+     stone dead ahead plots nearer than the same stone dead abeam, which is
+     exactly the lie a radar must not tell. Geometry x1.5, markers x1.25 —
+     the extra room is meant to separate the blips, not fatten them. */
+  const cx=RW-60, cy=HUD+66, r=36;
   g.fillStyle='rgba(18,12,36,.62)';
-  g.beginPath(); g.arc(cx,cy,r+9,0,7); g.fill();
+  g.beginPath(); g.arc(cx,cy,r+13,0,7); g.fill();
   g.strokeStyle='rgba(255,179,90,.55)'; g.lineWidth=1.6;
   g.beginPath(); g.arc(cx,cy,r,0,7); g.stroke();
   g.strokeStyle='rgba(255,179,90,.18)';
   g.beginPath(); g.arc(cx,cy,r*UH/Math.PI,0,7); g.stroke();   // your horizon ring
+  /* THE STATIC'S PRICE. A discharge kills the radar, and this is where you
+     feel it — no contacts, no lander, no sun, no meteor telegraph on the
+     map. Everything is still out there; you simply cannot see it. */
+  if(statBlind>0){
+    g.save();
+    g.beginPath(); g.arc(cx,cy,r,0,7); g.clip();
+    for(let i=0;i<70;i++){
+      const sd=(frame>>2)+i*7;
+      const a2=hash2(sd,i*13)*TAU, rr=Math.sqrt(hash2(i*5,sd+3))*r;
+      g.fillStyle='rgba(255,179,90,'+(0.10+0.34*hash2(sd+11,i)).toFixed(2)+')';
+      g.fillRect(cx+Math.cos(a2)*rr-1, cy+Math.sin(a2)*rr-1, 2, 2);
+    }
+    g.restore();
+    g.fillStyle='rgba(255,90,74,'+((frame>>4)%2?0.9:0.5)+')';
+    g.font='bold 9px '+FONT; g.textAlign='center';
+    g.fillText('NO SIGNAL', cx, cy+3);
+    g.textAlign='left';
+    return;
+  }
   const right=vx(camF,P);
   const pt=Q=>{
     const d=ad(Q,P);
@@ -1300,47 +1630,63 @@ function drawMiniMap(g){
   // lander
   { const [x,y]=pt(LANDER_Q);
     g.fillStyle='#eef0f6';
-    g.beginPath(); g.moveTo(x,y-4.4); g.lineTo(x+3.4,y+2.6); g.lineTo(x-3.4,y+2.6);
+    g.beginPath(); g.moveTo(x,y-5.5); g.lineTo(x+4.25,y+3.25); g.lineTo(x-4.25,y+3.25);
     g.closePath(); g.fill(); }
   // stones left / tanks left
   g.fillStyle='#ff9a3c';
-  for(const s of stones) if(!s.got){ const [x,y]=pt(s.Q); g.fillRect(x-1.4,y-1.4,2.8,2.8); }
+  for(const s of stones) if(!s.got){ const [x,y]=pt(s.Q); g.fillRect(x-1.75,y-1.75,3.5,3.5); }
   g.fillStyle='#7fd8ff';
-  for(const t of tanks) if(!t.got){ const [x,y]=pt(t.Q); g.fillRect(x-1.2,y-1.2,2.4,2.4); }
+  for(const t of tanks) if(!t.got){ const [x,y]=pt(t.Q); g.fillRect(x-1.5,y-1.5,3,3); }
   // monolith shelters — they matter, so the radar knows them
   g.fillStyle= flareMode? '#bfe8ff' : 'rgba(210,218,236,.7)';
-  for(const m of MONO){ const [x,y]=pt(m.Q), r2=1.4*m.sc; g.fillRect(x-r2,y-r2,r2*2,r2*2); }
+  for(const m of MONO){ const [x,y]=pt(m.Q), r2=1.75*m.sc; g.fillRect(x-r2,y-r2,r2*2,r2*2); }
+  /* the shaft appears on the radar only once it is open. Before that the
+     instrument has nothing to report, which is honest — and it means the
+     player who finds the seam early found it by LOOKING. */
+  if(level>=DESCEND_LV){
+    const [x,y]=pt(SHAFT_Q);
+    g.fillStyle='#05030c';
+    g.beginPath(); g.arc(x,y,4.4,0,7); g.fill();
+    g.strokeStyle='rgba(191,232,255,'+((frame>>3)%2?0.95:0.45)+')'; g.lineWidth=1.6;
+    g.beginPath(); g.arc(x,y,4.4,0,7); g.stroke();
+  }
   // cargo pods still out there
   g.fillStyle='#7fe87f';
   for(let i=0;i<pods.length;i++) if(!pods[i].home && carrying!==i){
-    const [x,y]=pt(pods[i].Q); g.fillRect(x-1.6,y-1.6,3.2,3.2); }
+    const [x,y]=pt(pods[i].Q); g.fillRect(x-2,y-2,4,4); }
   // the harvesters, always on the move
   g.fillStyle='#bfe8a0';
-  for(const h of HARV){ const [x,y]=pt(harvQ(h)); g.fillRect(x-2,y-2,4,4); }
+  for(const h of HARV){ const [x,y]=pt(harvQ(h)); g.fillRect(x-2.5,y-2.5,5,5); }
   // assessors — pale violet, blinking while they beam
   for(const a of aliens){
     if(a.st==='beam' && (frame>>2)%2) continue;
     const [x,y]=pt(a.Q);
-    g.fillStyle='#c9b5ff'; g.fillRect(x-1.8,y-1.8,3.6,3.6);
+    const after = a.st==='hunt' || a.st==='lift';
+    g.fillStyle= after? '#ff9ad8' : '#c9b5ff';
+    g.fillRect(x-2.25,y-2.25,4.5,4.5);
+    if(after){                       // the one contact that is coming for YOU
+      g.strokeStyle='rgba(255,154,216,'+((frame>>3)%2?0.95:0.4)+')'; g.lineWidth=1.4;
+      g.beginPath(); g.arc(x,y,6.5,0,7); g.stroke();
+    }
   }
   // the sun, pinned to the rim — blinks when it's angry
   { const t2=vam(SUN_Q,P,-vd(SUN_Q,P)); const l2=Math.hypot(t2[0],t2[1],t2[2]);
     const b2= l2<1e-9? 0 : Math.atan2(vd(t2,right)/l2, vd(t2,camF)/l2);
     if(!flareMode || (frame>>3)%2){
       g.fillStyle= flareMode? '#ff8a3c' : '#ffe9a0';
-      g.beginPath(); g.arc(cx+Math.sin(b2)*(r+5), cy-Math.cos(b2)*(r+5), flareMode?3:2.2, 0, 7); g.fill();
+      g.beginPath(); g.arc(cx+Math.sin(b2)*(r+7), cy-Math.cos(b2)*(r+7), flareMode?3.75:2.75, 0, 7); g.fill();
     }
   }
   // meteors — telegraphs blink, fallers burn
   for(const m of meteors){
     const [x,y]=pt(m.Q);
-    if(m.t<0){ if((frame>>2)%2){ g.fillStyle='#ff5a4a'; g.fillRect(x-2,y-2,4,4); } }
-    else { g.fillStyle='#ffb35a'; g.fillRect(x-2,y-2,4,4); }
+    if(m.t<0){ if((frame>>2)%2){ g.fillStyle='#ff5a4a'; g.fillRect(x-2.5,y-2.5,5,5); } }
+    else { g.fillStyle='#ffb35a'; g.fillRect(x-2.5,y-2.5,5,5); }
   }
   // you — the centre, always facing up
-  if((frame>>3)%2){ g.fillStyle='#ffffff'; g.beginPath(); g.arc(cx,cy,2.4,0,7); g.fill(); }
-  g.strokeStyle='rgba(255,255,255,.6)'; g.lineWidth=1.4;
-  g.beginPath(); g.moveTo(cx,cy); g.lineTo(cx,cy-6); g.stroke();
+  if((frame>>3)%2){ g.fillStyle='#ffffff'; g.beginPath(); g.arc(cx,cy,3,0,7); g.fill(); }
+  g.strokeStyle='rgba(255,255,255,.6)'; g.lineWidth=1.6;
+  g.beginPath(); g.moveTo(cx,cy); g.lineTo(cx,cy-9); g.stroke();
 }
 
 function drawHUDbarM(g){
@@ -1358,6 +1704,12 @@ function drawHUDbarM(g){
     g.font='11px '+FONT; g.fillStyle='#9a90c0';
     g.fillText('UP/DOWN walk · LEFT/RIGHT turn · SPACE jump/drop · ESC leave',12,37);
     g.globalAlpha=1;
+  } else if(bnd>1.001){
+    /* THE BOUND, printed only while you are actually holding a chain — it
+       lives in the band the controls hint vacates, so nothing overlaps. */
+    g.font='bold 11px '+FONT;
+    g.fillStyle= bnd>=BND_MAX? '#7fe87f' : '#ffb35a';
+    g.fillText('BOUND ×'+bnd.toFixed(1)+(bnd>=BND_MAX?' MAX':''),12,37);
   }
   // stones
   g.textAlign='center'; g.font='bold 13px '+FONT; g.fillStyle='#ff9a3c';
@@ -1372,8 +1724,21 @@ function drawHUDbarM(g){
   g.fillStyle= low? ((frame>>3)%2?'#ff5a4a':'#ff9a3c') : '#7fd8ff';
   g.fillRect(bx,10,bw*Math.max(0,o2)/O2_MAX,9);
   g.strokeStyle='#0e0a1c'; g.lineWidth=1.4; g.strokeRect(bx,10,bw,9);
-  g.textAlign='left'; g.font='bold 9px '+FONT; g.fillStyle='#cfd6ff';
-  g.fillText('O2', bx+2, 32);
+  /* THE STATIC, stacked under the air. Labels moved to the LEFT of both
+     bars — the old 'O2' caption sat under the bar in exactly the band this
+     one needs, and two stacked meters read faster than two scattered ones. */
+  const stf=stat/STAT_MAX, stHot=stf>0.78;
+  g.fillStyle='#3a3452'; g.fillRect(bx,24,bw,7);
+  g.fillStyle= statBlind>0? '#5a5270'
+             : stHot? ((frame>>2)%2?'#eef6ff':'#bfe8ff')
+             : '#8fa8d8';
+  g.fillRect(bx,24,bw*stf,7);
+  g.strokeStyle='#0e0a1c'; g.lineWidth=1.2; g.strokeRect(bx,24,bw,7);
+  g.textAlign='right'; g.font='bold 9px '+FONT;
+  g.fillStyle='#cfd6ff'; g.fillText('O2', bx-5, 18);
+  g.fillStyle= statBlind>0? ((frame>>3)%2?'#ff5a4a':'#8a7f9e') : (stHot?'#bfe8ff':'#9a90c0');
+  g.fillText(statBlind>0? 'DEAD':'STAT', bx-5, 31);
+  g.textAlign='left';
   // hearts (suit patches)
   for(let i=0;i<HEARTS0;i++){
     g.fillStyle= i<hearts? '#ff6a6a' : '#443a5a';
@@ -1396,8 +1761,11 @@ function draw(){
   /* painter order over the curve: far things first, the player (at
      depth CB) slotted in, near-side things last. */
   const list=[];
-  const push=(Q,fn,arg)=>{
-    if(ad(Q,P)>UH+0.04) return;
+  /* ext: a TALL thing crests the curve sooner than a pebble does. Only the
+     lander asks for it, and only a little — the projection's own clamp is
+     1.35 rad, so this must stay well under it. */
+  const push=(Q,fn,arg,ext)=>{
+    if(ad(Q,P)>UH+(ext||0.04)) return;
     const p=toCam(Q,0); if(!p) return;
     list.push({d:p.d, fn, p, arg});
   };
@@ -1408,7 +1776,7 @@ function draw(){
   for(const s of stones) if(!s.got && !(s.away>0)) push(s.Q, drawStone, s);
   for(const t of tanks) if(!t.got) push(t.Q, drawTank);
   for(const a of aliens) push(a.Q, drawAlien, a);
-  push(LANDER_Q, drawLander);
+  push(LANDER_Q, drawLander, null, 0.07);   // UH is 1.250; the clamp is 1.350. Stay off it.
   for(const m of meteors) push(m.Q, drawMeteor, m);
   list.push({d:CB, fn:'player'});
   list.sort((a,b)=>b.d-a.d);
@@ -1481,13 +1849,40 @@ function draw(){
     g.fillText('A whole little world. Twelve stones. Bring them home.', RW/2, HUD+172);
     g.globalAlpha=1;
   }
+  /* THE DESCENT. The surface closes over from the rim inward — you are not
+     fading out, the hole is swallowing the picture. Nothing is explained. */
+  if(descT>0){
+    const k=Math.min(1,descT/110);
+    g.save();
+    g.beginPath(); g.rect(0,HUD,RW,RH);
+    g.arc(RW/2, HUD+RH*0.52, Math.max(0,(RW*0.78)*(1-k)), 0, 7, true);
+    g.fillStyle='#05030c'; g.fill();
+    g.restore();
+    if(descT>70){
+      g.globalAlpha=Math.min(1,(descT-70)/50);
+      g.textAlign='center';
+      g.font='bold 22px '+FONT; g.fillStyle='#bfe8ff';
+      g.fillText('THE WRONG SHADOW WAS A DOOR', RW/2, HUD+RH/2-10);
+      g.font='12px '+FONT; g.fillStyle='#8fa8d8';
+      g.fillText('Whatever built this was heavy, and liked it here.', RW/2, HUD+RH/2+14);
+      g.globalAlpha=1;
+    }
+  }
   if(doneT>0){
-    g.fillStyle='rgba(10,6,20,.72)'; g.fillRect(0,HUD,RW,RH);
+    g.fillStyle= descended? 'rgba(4,3,10,.86)' : 'rgba(10,6,20,.72)';
+    g.fillRect(0,HUD,RW,RH);
     g.textAlign='center'; g.font='bold 24px '+FONT;
-    g.fillStyle= over? '#ff9a9a' : '#ffb35a';
-    g.fillText(over? 'THE MOON KEEPS YOU' : 'FIRST FOOTPRINTS', RW/2, HUD+RH/2-8);
+    g.fillStyle= descended? '#bfe8ff' : over? '#ff9a9a' : '#ffb35a';
+    g.fillText(descended? 'YOU ARE BELOW' : over? 'THE MOON KEEPS YOU' : 'FIRST FOOTPRINTS',
+               RW/2, HUD+RH/2-8);
     g.font='12px '+FONT; g.fillStyle='#d8cfe8';
-    g.fillText(over? 'Score '+score+' · Level '+level : 'The flag flies. Score '+score, RW/2, HUD+RH/2+16);
+    g.fillText(descended? 'Score '+score+' · the way down is open for good'
+               : over? 'Score '+score+' · Level '+level
+               : 'The flag flies. Score '+score, RW/2, HUD+RH/2+16);
+    if(descended){
+      g.font='11px '+FONT; g.fillStyle='#7a6f9a';
+      g.fillText('THE DEEP is not dug yet. The door is.', RW/2, HUD+RH/2+38);
+    }
   }
 }
 
@@ -1506,7 +1901,7 @@ window.MoonwalkLayer={
   },
   update, draw,
   _t:{ get z(){return z;}, get o2(){return o2;}, set o2(v){o2=v;},
-       get hearts(){return hearts;}, get score(){return score;},
+       get hearts(){return hearts;}, get score(){return score;}, set score(v){score=v;},
        get stones(){return stones;}, get tanks(){return tanks;},
        get meteors(){return meteors;}, get scorches(){return scorches;},
        get prints(){return prints;},
@@ -1524,6 +1919,17 @@ window.MoonwalkLayer={
        get level(){return level;}, set level(v){level=v;},
        get dropT(){return dropT;}, get aliens(){return aliens;}, get tracks(){return tracks;},
        spawnAlien, ALIEN_SPD, ALIEN_BEAM, ALIEN_AWAY, ALIEN_EVERY,
+       // THE BOUND · THE STATIC · HUNTED WHEN LOADED (2026-08-24)
+       BND_MAX, BND_STEP, BND_WIN, STAT_MAX, STAT_BLIND,
+       HUNT_LOCK, HUNT_NEAR, HUNT_BREAK, huntChance, loseStone,
+       get bnd(){return bnd;}, set bnd(v){bnd=v;},
+       get bndT(){return bndT;}, set bndT(v){bndT=v;},
+       get stat(){return stat;}, set stat(v){stat=v;},
+       get statBlind(){return statBlind;}, set statBlind(v){statBlind=v;},
+       // THE WRONG SHADOW + THE PHASE SHIFT (2026-08-24)
+       WRONG, WRONG_TURN, SHAFT_Q, SHAFT_R, DESCEND_LV, SHAFT_HINTS, dirT,
+       get descT(){return descT;}, get descended(){return descended;},
+       get hintedLv(){return hintedLv;}, set hintedLv(v){hintedLv=v;},
        HARV, harvQ, harvDir, HARV_VENT, HARV_BLOCK, HARV_CUT, HARV_HEAD, STONES_LL,
        setP(Q){ P=vn(Q.slice()); H=vn(vam([1,0,0],P,-vd([1,0,0],P)));
          if(Math.hypot(H[0],H[1],H[2])<0.5){ H=vn(vam([0,0,1],P,-vd([0,0,1],P))); } camF=H.slice(); },
