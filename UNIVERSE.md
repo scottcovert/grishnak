@@ -23,9 +23,27 @@ leave a game the way you entered it and you are standing where the door is.
 
 It began as a Commodore 64 game its author wrote in the 1980s. The name is his.
 
-**The one structural idea worth stealing:** a door is not a menu. The player
-never picks a game from a list; they find one by walking. That is why the map
-is the game and every cabinet is a place before it is a genre.
+**The one structural idea worth stealing: a door is not a menu.**
+
+Most collections of games are a list. You look at the list, you read the
+titles, you choose. The choosing happens outside the fiction — you are a person
+at a menu, deciding what to spend the next twenty minutes on.
+
+Grishnak has no list. To reach a game you walk to the thing it lives in and
+open it. You find the wreck in the wheat before you find the game inside the
+wreck. That means you meet every game as **a place you came across**, not an
+option you evaluated — and when you leave it, you step back out of the same
+wreck, standing in the same field.
+
+Two things follow, and they are why the rule is worth keeping:
+- **The map is the game.** Walking around is not navigation between the real
+  content; it is the thing that holds the content together.
+- **Every cabinet is a place before it is a genre.** You do not think "I will
+  play a breakout clone now." You think "there is a cabinet in the square."
+
+(There is a shortcut — `?g=<slug>` deep links open any space directly, for
+sharing and for video. That is a side door for the owner and the audience,
+not the way the world is meant to be met.)
 
 ---
 
