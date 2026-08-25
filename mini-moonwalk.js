@@ -583,7 +583,12 @@ function update(){
       toast(left? 'Cargo aboard — +'+POD_SCORE+'. '+left+' pod'+(left>1?'s':'')+' still out there.'
                 : 'All cargo recovered — +'+POD_SCORE+'. The manifest is clean.');
     }
-    if(stonesGot()===STONE_N && plantT===0){ plantT=1; sfx.chest && sfx.chest(); }
+    /* The ceremony belongs to the SURFACE ROUNDS ONLY. Without this gate the
+       phase shift cascades: level 4 marks every stone as held, and you are
+       standing at the lander the instant it starts (you just planted the
+       flag there), so the ceremony re-fires and runs 4->5->6 in one breath.
+       There is nothing left to plant a flag for down here. */
+    if(level<DESCEND_LV && stonesGot()===STONE_N && plantT===0){ plantT=1; sfx.chest && sfx.chest(); }
   }
 
   /* --- THE WRONG SHADOW: one thread, running through every round ---------
@@ -622,7 +627,11 @@ function update(){
 
   // meteors — telegraphed, then a ground blast. Airborne = safe.
   if(--metT<=0){
-    metT=Math.max(90, 250-stonesGot()*12-(level-1)*20);
+    /* On the descent round the stones formula is meaningless — every stone
+       reads as held, which would peg the rate at its floor by accident.
+       Pick the cadence on purpose instead: tense, and survivable. */
+    metT = level>=DESCEND_LV ? 130
+         : Math.max(90, 250-stonesGot()*12-(level-1)*20);
     const phi=Math.random()*TAU, d=0.25+Math.random()*1.15;
     const right=vx(H,P);
     const t=vn(vam(vm(H,Math.cos(phi)),right,Math.sin(phi)));
@@ -630,10 +639,12 @@ function update(){
   }
   for(let i=meteors.length-1;i>=0;i--){
     const m=meteors[i]; m.t++;
-    if(m.t===0){ sfx.mine && sfx.mine(); }
+    /* the whoosh starts the instant it commits to falling, and is handed the
+       fall time so it arrives WITH the rock instead of near it */
+    if(m.t===0){ sfx.incoming? sfx.incoming(MET_FALL/60) : (sfx.mine && sfx.mine()); }
     if(m.t>=MET_FALL){
       scorches.push({Q:m.Q, t:240});
-      sfx.explode && sfx.explode();
+      sfx.impact? sfx.impact() : (sfx.explode && sfx.explode());
       const p=surfPt(m.Q);
       burst(p.x, p.y, '#ff9a3c', 14); burst(p.x, p.y, '#ffe9a0', 8);
       if(ad(P,m.Q)<0.045 && z<20) hurt();
@@ -663,7 +674,11 @@ function update(){
   for(let i=tracks.length-1;i>=0;i--) if(--tracks[i].t<=0) tracks.splice(i,1);
 
   // THE ASSESSORS (level 2+): they come for the diamonds, not for you
-  if(level>=2){
+  /* ...and they stop coming on the descent round. They want diamonds; there
+     are none left on this moon, and a hunter chasing a phantom bagful would
+     steal a stone that does not exist. The hazards that remain are the ones
+     that never cared what you were carrying. */
+  if(level>=2 && level<DESCEND_LV){
     const want=Math.min(3, level-1);
     if(aliens.length<want && --alienT<=0){ spawnAlien(); alienT=ALIEN_EVERY; }
   }
@@ -1712,8 +1727,14 @@ function drawHUDbarM(g){
     g.fillText('BOUND ×'+bnd.toFixed(1)+(bnd>=BND_MAX?' MAX':''),12,37);
   }
   // stones
-  g.textAlign='center'; g.font='bold 13px '+FONT; g.fillStyle='#ff9a3c';
-  g.fillText('◆ '+stonesGot()+'/'+STONE_N, RW/2-56, 21);
+  g.textAlign='center'; g.font='bold 13px '+FONT;
+  if(level>=DESCEND_LV){          // no stones left to count — one thing to reach
+    g.fillStyle= descended? '#8fa8d8' : ((frame>>4)%2?'#bfe8ff':'#7fa8c8');
+    g.fillText('THE SHAFT', RW/2-56, 21);
+  } else {
+    g.fillStyle='#ff9a3c';
+    g.fillText('◆ '+stonesGot()+'/'+STONE_N, RW/2-56, 21);
+  }
   g.font='bold 10px '+FONT; g.fillStyle='#7fe87f';
   g.fillText('CARGO '+pods.filter(p2=>p2.home).length+'/'+pods.length, RW/2-56, 36);
   g.fillStyle='#cfd6ff'; g.font='bold 11px '+FONT;

@@ -778,7 +778,63 @@ const sfx={
   denied(){ beep(200,120,0.15,'square',0.08); },
   /* Williams-arcade flavor: fast rising rescue arpeggio + layered explosion */
   rescue(){ melody([392,523,659,784,1047,1319,1568,2093],0.038,'square',0.12); beep(2093,3200,0.1,'sine',0.07); },
-  explode(){ beep(140,25,0.28,'sawtooth',0.17); beep(70,18,0.4,'square',0.13); beep(900,60,0.12,'square',0.09); }
+  explode(){ beep(140,25,0.28,'sawtooth',0.17); beep(70,18,0.4,'square',0.13); beep(900,60,0.12,'square',0.09); },
+  /* --- THE INCOMING (Scott 2026-08-25) -----------------------------------
+     A meteor used to announce itself with a 60ms blip, which told you a
+     thing had happened rather than that a thing was ON ITS WAY. This is
+     filtered noise sweeping UP through a bandpass while the gain swells —
+     air being torn — with a thin falling whistle riding on top for the
+     object itself. Pass the fall time so the sound lands when the rock does.
+     Every ramp target is > 0: exponentialRamp dies silently at zero. */
+  incoming(dur){
+    const ac=audio(); if(!ac||muted) return;
+    const d=Math.max(0.2,dur||0.8), t0=ac.currentTime;
+    const len=Math.ceil(ac.sampleRate*d);
+    const buf=ac.createBuffer(1,len,ac.sampleRate);
+    const ch=buf.getChannelData(0);
+    for(let i=0;i<len;i++) ch[i]=Math.random()*2-1;
+    const n=ac.createBufferSource(); n.buffer=buf;
+    const bp=ac.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=2.2;
+    bp.frequency.setValueAtTime(240,t0);
+    bp.frequency.exponentialRampToValueAtTime(2400,t0+d);
+    const g=ac.createGain();
+    g.gain.setValueAtTime(0.0004,t0);
+    g.gain.exponentialRampToValueAtTime(0.17,t0+d*0.88);
+    g.gain.exponentialRampToValueAtTime(0.02,t0+d);
+    n.connect(bp); bp.connect(g); g.connect(ac.destination);
+    n.start(t0); n.stop(t0+d+0.02);
+    const o=ac.createOscillator(), og=ac.createGain();
+    o.type='sine';
+    o.frequency.setValueAtTime(1500,t0);
+    o.frequency.exponentialRampToValueAtTime(400,t0+d);
+    og.gain.setValueAtTime(0.0004,t0);
+    og.gain.exponentialRampToValueAtTime(0.05,t0+d*0.72);
+    og.gain.exponentialRampToValueAtTime(0.001,t0+d);
+    o.connect(og); og.connect(ac.destination);
+    o.start(t0); o.stop(t0+d+0.02);
+  },
+  /* THE IMPACT: a sub thump you feel, a long body of noise darkening as it
+     decays (dust, not fire), and a short crack so it still reads on a laptop
+     speaker that cannot reproduce the bottom octave at all. */
+  impact(){
+    const ac=audio(); if(!ac||muted) return;
+    const t0=ac.currentTime, d=0.7;
+    const len=Math.ceil(ac.sampleRate*d);
+    const buf=ac.createBuffer(1,len,ac.sampleRate);
+    const ch=buf.getChannelData(0);
+    for(let i=0;i<len;i++){ const k=1-i/len; ch[i]=(Math.random()*2-1)*k*k; }
+    const n=ac.createBufferSource(); n.buffer=buf;
+    const lp=ac.createBiquadFilter(); lp.type='lowpass';
+    lp.frequency.setValueAtTime(1900,t0);
+    lp.frequency.exponentialRampToValueAtTime(170,t0+d*0.85);
+    const g=ac.createGain();
+    g.gain.setValueAtTime(0.34,t0);
+    g.gain.exponentialRampToValueAtTime(0.001,t0+d);
+    n.connect(lp); lp.connect(g); g.connect(ac.destination);
+    n.start(t0); n.stop(t0+d+0.02);
+    beep(120,26,0.5,'sine',0.30);        // the one you feel
+    beep(340,50,0.16,'sawtooth',0.13);   // the one small speakers get
+  }
 };
 
 /* ---------------- GAME STATE ---------------- */
@@ -6609,6 +6665,22 @@ function drawRadTomato(d){
 }
 
 function draw(){
+  /* CANVAS STATE ARMOR (2026-08-25). Scott's Stonebreaker session lost its
+     whole HUD band: a one-time mid-frame exception in any layer can skip a
+     ctx.restore(), and a leaked CLIP then silently erases everything outside
+     it on every later frame — play area fine, top bar black, forever, until
+     a reload. The live files rendered perfectly in a clean browser, which is
+     the signature of wedged canvas state rather than broken code. So: every
+     frame starts from a known-clean context, for every layer in the cabinet.
+     reset() clears transform+clip+save stack; the drain is the old-browser
+     fallback (restore beyond the stack is a legal no-op). */
+  if(ctx.reset) ctx.reset();
+  else { for(let i=0;i<8;i++) ctx.restore(); ctx.globalAlpha=1;
+         ctx.globalCompositeOperation='source-over'; }
+  /* the page-scale transform is init-time state (line ~109) and must survive
+     the armor — reset() clears it along with the leaks */
+  ctx.setTransform(SCALE,0,0,SCALE,0,0);
+  ctx.imageSmoothingEnabled=true;
   ctx.fillStyle='#000'; ctx.fillRect(0,0,RW,RH+HUD);
   if(state==='title'){ drawTitle(); return; }
   if(state==='cavetrans' && trans){ drawCaveTrans(); return; }
@@ -7564,7 +7636,7 @@ function devJump(fn, scr){
 <script src="kingdom-woodsrun.js?v=2026081508"></script>
 <script src="kingdom-quarry.js?v=2026081405"></script>
 <script src="kingdom-workings.js?v=2026081405"></script>
-<script src="mini-highmaze.js?v=2026082404"></script>
+<script src="mini-highmaze.js?v=2026082511"></script>
 <script src="../interlude.js?v=2026081405"></script>
 <script src="kingdom-maze.js?v=2026082201"></script>
 <script src="mini-asteroids.js?v=2026081405"></script>
@@ -7573,10 +7645,10 @@ function devJump(fn, scr){
 <script src="mini-robotron.js?v=2026081405"></script>
 <script src="mini-archive.js?v=2026081405"></script>
 <script src="mini-chess.js?v=2026082001"></script>
-<script src="mini-breakout.js?v=2026082402"></script>
+<script src="mini-breakout.js?v=2026082502"></script>
 <script src="mini-hazymaze.js?v=2026081405"></script>
-<script src="mini-moonwalk.js?v=2026082404"></script>
-<script src="mini-pacsphere.js?v=2026082201"></script>
+<script src="mini-moonwalk.js?v=2026082501"></script>
+<script src="mini-pacsphere.js?v=2026082512"></script>
 <script src="mini-rose.js?v=2026082001"></script>
 <script src="mini-river.js?v=2026082004"></script>
 <script src="mini-launch.js?v=2026082112"></script>

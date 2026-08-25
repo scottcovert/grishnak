@@ -130,7 +130,7 @@ const BOLIDE_T=300, BOLIDE_R=36;               // 5s of flaming bolide; smash ra
    Their steel eyes never break — break the cats and the eyes stay,
    watching. */
 //LEVELS-START
-const LEVELS=[
+const LEVELS_SRC=[
  /* wall 1 — THE CHIMNEY, mixed masonry (Scott, 2026-08-23: "replace level 1
     3 middle columns of bricks with same shapes but made of smallest size
     bricks - it's very cool when the ball bounces around rapidly amongst
@@ -749,7 +749,35 @@ const BOSS_WALL=[
   ".2222222222222.",
   ".1111111111111.",
   "..............."];
-LEVELS.push(BOSS_WALL);
+LEVELS_SRC.push(BOSS_WALL);
+
+/* ============ THE PLAY ORDER (Scott, 2026-08-25) =========================
+   "reorder the stonebreaker walls: 6 first, then 8, 4, 10, then the rest as
+   they were, re-numbered accordingly."
+
+   Done as ONE PERMUTATION rather than by moving 35 map literals around and
+   hand-remapping four index-keyed tables after them. WALL_FIRST is written
+   in the numbers Scott used (1-based, minus one); everything downstream —
+   LEVELS, WALL_NAMES, FEATS, WALL_CARDS, LODGE_LVL — is derived. Reordering
+   again is a one-line edit to WALL_FIRST, not a refactor.
+
+   THIS MUST SIT BELOW THE BOSS PUSH. The literal above holds 34 walls and
+   the Warlord is appended after it — exactly as its own comment warns. Built
+   above the push, the permutation covered 34 walls while LEVELS ended up
+   with 35, and WALL_NAMES came out one short of the map list.
+
+   Authoring stays in the ORIGINAL order: new walls still go inside the
+   LEVELS_SRC literal, the Warlord is still pushed after it, and because
+   nothing promotes his index he stays last in play. */
+const WALL_FIRST=[5,7,3,9];              // TWO CATS · THE QUARRY FIELD · THE SHELF · THE HEAVY STAR
+const WALL_ORDER=WALL_FIRST.concat(
+  LEVELS_SRC.map((_,i)=>i).filter(i=>WALL_FIRST.indexOf(i)<0));
+const OLD_TO_NEW=[]; WALL_ORDER.forEach((o,n)=>{ OLD_TO_NEW[o]=n; });
+const LEVELS=WALL_ORDER.map(i=>LEVELS_SRC[i]);
+/* remap any {oldIndex: value} table onto the play order */
+const reindex=src=>{ const out={};
+  for(const k in src){ const n=OLD_TO_NEW[+k]; if(n!==undefined) out[n]=src[k]; }
+  return out; };
 /* wall 11 — THE PACHINKO DECK: seven one-lane tunnels between steel
    walls at the bottom — pick one, thread the ball up it — opening into
    a stud room and a dense pin-field above: staggered steel studs whose
@@ -775,20 +803,21 @@ const WALL_KEYS='abcdefghijklmno';
    the 'g'-trap class again, sprung from OUTSIDE the file this time, where the
    tool-key pin can't see. The menu (W) is the durable fix: every wall, by
    name, arrows + ENTER — no letter can ever be stolen from it. */
-const WALL_NAMES=['THE CHIMNEY','THE COOPERAGE','THE RIBS','THE SHELF',
+const WALL_NAMES_SRC=['THE CHIMNEY','THE COOPERAGE','THE RIBS','THE SHELF',
  'THE GALLERIES','TWO CATS','THE CLUTCH','THE QUARRY FIELD','THE TELL',
  'THE HEAVY STAR','THE PACHINKO DECK','THE VAULT','THE APPROACH','THE DESCENT',
  'THE BUMPERS','THE GRANITE','THE GREENWOOD','THE COOLING HOUSE','THE ANVIL',
  'THE ZING','THE CRUCIBLE','THE MURMURATION','THE STARFALL','THE LODGE',
  'THE COLONY','THE PLAYSET','THE LOOM','THE TOLLHOUSE','THE CEILING',
  'THE UNSEEN','THE GRIN','BLOCKHEAD','SQUARE ONE',"THE MASON'S YARD",'THE WARLORD'];
+const WALL_NAMES=WALL_ORDER.map(i=>WALL_NAMES_SRC[i]);
 /* wall 10 — THE HEAVY STAR: an ultra dense sphere hangs near top middle
    and WARPS every ball path — constant pull toward it, applied before the
    speed renormalise, so gravity bends trajectories without ever changing
    pace. The core itself is a solid mirror: dead-centre shots ricochet off
    it. Side towers are easy prey for curved shots; the treasure row sits
    directly BENEATH the star, where straight shots can't live. */
-const GRAV_LVL=9;
+const GRAV_LVL=OLD_TO_NEW[9];
 const STAR_X=W/2, STAR_Y=116, STAR_R=15, STAR_G=3400;
 /* THE BLACK HOLE MOVES (Scott, 2026-08-17 — he asked for it in the builder).
    starX/starY were baked into ten call sites, so the well could only ever
@@ -801,29 +830,29 @@ let starX=STAR_X, starY=STAR_Y;
    The ball only ever touches the base layer; kill it and the layer above
    CRASHES DOWN to base level (tier 1, then 2, then 3 — the mound gets
    harder as it settles). Two steel pillars split the mounds. */
-const STACK_LVL=8;
+const STACK_LVL=OLD_TO_NEW[8];
 /* wall 5 — THE GALLERIES: the spectacle wall. Powerup drops are nearly
    doubled and up to 4 pills may fall at once — the rain IS the show. */
-const SHELF_LVL=3;                             // wall 4 — gets the gutter-sealing plate
-const GALL_LVL=4, GALL_PUP=0.30, GALL_CAP=4;
+const SHELF_LVL=OLD_TO_NEW[3];                             // wall 4 — gets the gutter-sealing plate
+const GALL_LVL=OLD_TO_NEW[4], GALL_PUP=0.30, GALL_CAP=4;
 /* Wall 13 — THE APPROACH (Scott 2026-08-13): rendered in PERSPECTIVE, the
    field narrowing toward the top like an aerial shooter's runway. Physics
    stay in plain board space; only the drawing leans — every element is
    squeezed toward the centreline by its own depth. */
-const PERSP_LVL=12, PERSP_TOP=0.55;            // horizontal scale up at the far wall
+const PERSP_LVL=OLD_TO_NEW[12], PERSP_TOP=0.55;            // horizontal scale up at the far wall
 /* wall 7 — THE CLUTCH: every brick is a wide oval EGG. Eggs GESTATE
    (wobble, sprout wing nubs), and a fully-gestated egg flies up to the
    belt, rides it into the PORTAL, and is re-laid at a random empty spot —
    stall and the clutch rearranges itself. Two TEETER-TOTTER branches
    below the eggs cycle balls back up through real angled ricochets.
    The two steel '#' are STONES someone slipped into the clutch. */
-const EGG_LVL=6;
+const EGG_LVL=OLD_TO_NEW[6];
 const BELT_Y=62, TEET_L=52, TEET_MAX=0.5;
 /* wall 8 — THE QUARRY FIELD: randomized every visit. Top 2 brick rows stay
    empty; the space below divides into SIX square areas (3 across, 2 down).
    Odds of a brick peak at each area's heart and fall off to 45% at its
    edge — six dense hearts with ragged rims, never the same twice. */
-const RAND_LVL=7;
+const RAND_LVL=OLD_TO_NEW[7];
 const RAND_R0=2, RAND_ROWS=10, RAND_CB=[0,4,9,13];   // area col boundaries
 /* wall 14 — THE DESCENT (Scott's "sinking wall", 2026-08-08): the wall
    drifts down as ONE piece — a shared offset, so every brick stays welded
@@ -836,7 +865,7 @@ const RAND_R0=2, RAND_ROWS=10, RAND_CB=[0,4,9,13];   // area col boundaries
    The 'G' bricks pair Scott's gestation idea with this one, his own note:
    "a brick that finishes gestating hatches into something." They hatch
    LOOSE and fall on their own, well ahead of the wall. */
-const SINK_LVL=13;
+const SINK_LVL=OLD_TO_NEW[13];
 const SINK_FLOOR=PY-30, SINK_BASE=0.055, SINK_RECOIL=40;
 const LURCH_MIN=300, LURCH_VAR=400, LURCH_D=8, LURCH_DV=10;
 const HATCH_V=1.15;
@@ -845,7 +874,7 @@ const HATCH_V=1.15;
    RADIALLY — away from the bumper's heart, never along the face it came in
    on — carrying a boost that decays over KICK_T frames, so a bumper cluster
    throws real pinball chaos without permanently changing the pace. */
-const BUMP_LVL=14;
+const BUMP_LVL=OLD_TO_NEW[14];
 const KICK_T=26, KICK_MULT=1.5, KICK_RADIAL=0.62;
 /* the boost is a reward for chaos up at the wall, not a punishment on the way
    down: a kick that leaves steeper than KICK_DOWN below horizontal keeps the
@@ -858,7 +887,7 @@ const DRY_GRACE=6, DRY_STEP=0.035, DRY_MAX=0.30;
    purpose: the HEAD of a column is the only brick you should ever have to pay
    full price for, because MOLT_LIFE/DRIP_EVERY drips at DRIP_BITE hits each
    comfortably melt the brick below it and start the chain over. */
-const GRAN_LVL=15;
+const GRAN_LVL=OLD_TO_NEW[15];
 const GRAN_HP=6, MOLT_LIFE=260, DRIP_EVERY=52, DRIP_BITE=2;
 const DRIP_V=1.5, DRIP_VMAX=4.2;
 const HOT_T=90, HOT_BITE=3;                    // a ball that fell through lava
@@ -871,13 +900,13 @@ const HOT_T=90, HOT_BITE=3;                    // a ball that fell through lava
    At 900 the wall costs about as much as walls 9, 11, 12 and 15 do — mid-pack,
    not an outlier — and the punishment still lands where it should, on the
    scattered leftovers at the tail. */
-const GRN_LVL=16;
+const GRN_LVL=OLD_TO_NEW[16];
 const GRN_MAX=3, GRN_COOL=900;
 /* wall 18 — THE COOLING HOUSE. Below TEMP_COLD brittle stone shatters whole;
    above TEMP_HOT the ball skids off it without a mark; between, it chips like
    anything else. TEMP_HEAT is what a broken brick puts back, so the wall is a
    loop rather than a one-way trip to the pool. */
-const TEMP_LVL=17;
+const TEMP_LVL=OLD_TO_NEW[17];
 const TEMP_START=0.6, TEMP_COLD=0.35, TEMP_HOT=0.65;
 const TEMP_COOL=0.04, TEMP_HEAT=0.10;
 const TEMP_SLOW=0.78, TEMP_FAST=1.22;
@@ -888,7 +917,7 @@ const POOL_Y0=TOP+11*(BH+GAP), POOL_Y1=POOL_Y0+46;
    kills it, an ordinary ball rings off it for ever. Bombs, kegs, bolides and
    the death ray still take it, deliberately — a player who cannot find the
    timing must never be sealed out of the wall entirely. */
-const DRIV_LVL=18;
+const DRIV_LVL=OLD_TO_NEW[18];
 /* THE THUMP CARD (Scott, 2026-08-21). Driven stone is the one brick in the
    game that answers to an INPUT instead of to position, and a player who has
    spent eighteen walls learning to AIM has no reason on earth to guess that.
@@ -908,7 +937,7 @@ const CARDS={driv:'You Gotta THUMP It', loom:'Cut the Pins LAST',
    because 'mix' now rides six walls and the warning belongs to exactly one.
    Wall 1 (Scott, 2026-08-24): the ball really does leak through the segmented
    floor's seams, and being told once beats discovering it as a betrayal. */
-const WALL_CARDS={0:'Mind The Gaps In The Steel'};
+const WALL_CARDS=reindex({0:'Mind The Gaps In The Steel'});
 /* THE UNSEEN — every brick starts at vis 0 and draws NOTHING. A strike pings
    a brief outline (the sonar's voice); a BREAK gives every brick within 2
    cells +1% visible, permanently. The literal 1% is Scott's spec: the wall
@@ -942,7 +971,7 @@ let thumpT=0, thumpMsg='';
    means the lock is a CHOICE — spend the coins here or save them for the
    dearer course behind — which is the only reason an economy is worth
    having in a game about hitting a ball. */
-const TOLL_LVL=27;
+const TOLL_LVL=OLD_TO_NEW[27];
 const TOLL_HP=6;                      // what a toll costs in WORK, if you will not pay
 const TOLL_PRICE={x:1, y:2};          // ...and what it costs in COIN
 const COIN_FALL=1.9, COIN_R=6;
@@ -957,7 +986,7 @@ let purse=0, coins=[];
    The flanks of the layout are left open on purpose: the roof has to be
    live from the first serve, or it is a surprise saved for the endgame
    rather than a rule. */
-const CEIL_LVL=28;
+const CEIL_LVL=OLD_TO_NEW[28];
 const CEIL_Y=TOP+8;                   // the upper slab's line
 const CEIL_KILL=TOP-10;               // past this, it is gone — same as the floor
 /* The slab gets a faster rail here, and it HAS to. The mirror asks it to cross
@@ -971,7 +1000,7 @@ const CEIL_KILL=TOP-10;               // past this, it is gone — same as the f
    before the Warlord ought to be. */
 const CEIL_SPD=1.55;
 const ceilX=()=>W-pad.x;              // the mirror, and the whole mechanic
-const LOOM_LVL=26;
+const LOOM_LVL=OLD_TO_NEW[26];
 const SAG_HELD=9;         // droop allowed while both pins hold: a warning, not a threat
 const SAG_ONE=19;         // ...with one pin gone
 const SAG_MAX=32;         // ...with the line cut, before it starts to travel
@@ -1021,7 +1050,7 @@ const ROTOR_SPD=0.34;       // radians/frame — fast enough to blur
    left over is what the wander gets — so the flock can never leave the
    board or come below MURM_FLOOR into the player's air. A small flock
    therefore ranges FARTHER than a big one, which is true of the real thing. */
-const MURM_LVL=21;
+const MURM_LVL=OLD_TO_NEW[21];
 const MURM_FLOOR=308;                 // the sky's floor — the slab's air starts here
 /* 0.16 rad, not more: the wheel couples WIDTH into HEIGHT (a wide flock's
    wingtips swing vertically as it banks), and past ~0.16 a full-width flock's
@@ -1609,7 +1638,7 @@ function drawStorm(){
    Every rite may carry banner:'TEXT' — a telegraph line mid-screen.
    (Builder walls don't carry rites yet — a future 'rites page' if wanted.) */
 const RITE_BORN=26;                  // frames of arrival glow on a placed/changed brick
-const LODGE_LVL=23;
+const LODGE_LVL=OLD_TO_NEW[23];          // THE LODGE, wherever the play order puts it
 const WALL_RITES={
   [LODGE_LVL]:[
     {when:{kind:'count', n:8},
@@ -1722,7 +1751,7 @@ function riteTick(){
    bounded out of it, so the open trap channel every wall keeps above its
    bricks survives here too: a ball threaded over the colony rebounds along
    the roof, exactly the payoff that channel exists for */
-const LIFE_LVL=24, LIFE_STEP=88, LIFE_ROWS=12, LIFE_CAP=150, LIFE_SEED=0.34;
+const LIFE_LVL=OLD_TO_NEW[24], LIFE_STEP=88, LIFE_ROWS=12, LIFE_CAP=150, LIFE_SEED=0.34;
 let lifeT=0, lifeGen=0;
 function lifeNeighbours(occ,c,r){
   let n=0;
@@ -1775,7 +1804,10 @@ function lifeTick(){
   lifeDoomMarks();
 }
 
-const FEATS={
+/* keyed in AUTHORING order (the LEVELS_SRC literal), then permuted onto the
+   play order by reindex() — so these comments stay true to the map above
+   them and never have to be renumbered when Scott reorders. */
+const FEATS=reindex({
   0:['mix'],             //  0 = THE CHIMNEY: cube-packed comb, 2026-08-23
   1:['mix'],             //  1 = THE COOPERAGE: barrels on a rack, 2026-08-24
   2:['mix'],             //  2 = THE RIBS: remade in mixed masonry 2026-08-23
@@ -1797,7 +1829,7 @@ const FEATS={
   31:['sqr'],            // 31 = BLOCKHEAD: square blocks, 32 on a side
   32:['sqr','fine'],     // 32 = SQUARE ONE: a lattice of 14px square tiles
   33:['mix']             // 33 = THE MASON'S YARD: every cut of stone at once
-};
+});
 /* every feature a custom wall is allowed to switch on. 'rand' is deliberately
    absent — it GENERATES its wall, so it would throw away whatever was drawn. */
 const FEAT_LIST=['shelf','gall','egg','stack','grav','persp','sink','bump',
@@ -5070,18 +5102,39 @@ let bgMap={}, bgImg={}, bgUI=null;
 
 function bgLoadPrefs(){
   try{ bgMap=JSON.parse(localStorage.getItem(BG_KEY)||'{}')||{}; }catch(e){ bgMap={}; }
+  bgMigrate();
+}
+/* ONE-TIME MIGRATION (2026-08-25). Per-wall backgrounds were stored under the
+   wall's INDEX, so the play reorder would have silently handed every saved
+   picture to a different wall. Favourites were keyed by NAME for exactly this
+   reason; backgrounds had the same latent bug and this is the reorder that
+   would have sprung it. Numeric keys are rewritten to names using the
+   AUTHORING order they were saved against, then the numbers are dropped.
+   'all' and 'custom' are reserved and pass straight through. */
+function bgMigrate(){
+  let moved=0;
+  for(const k of Object.keys(bgMap)){
+    if(!/^\d+$/.test(k)) continue;                 // 'all' / 'custom' / already a name
+    const nm=WALL_NAMES_SRC[+k];
+    if(nm && !bgMap[nm]) bgMap[nm]=bgMap[k];
+    delete bgMap[k]; moved++;
+  }
+  if(moved) bgSavePrefs();
 }
 function bgSavePrefs(){
   try{ localStorage.setItem(BG_KEY, JSON.stringify(bgMap)); }
   catch(e){ if(bgUI) bgUI.msg='Too big to remember — it will last this session only.'; }
 }
-function bgKey(){ return level<0? 'custom' : String(level); }
+/* keyed by NAME, not index — same rule the favourites already follow, so a
+   reorder can never hand one wall's picture to another. */
+function bgKey(){ return level<0? 'custom' : (WALL_NAMES[level] || String(level)); }
 /* THE HOUSE BACKGROUND (Scott, 2026-08-24: "a feature where they can choose 1
    image as overall game background, local storage, stretches to fit").
    Stored under the reserved key 'all' and used by EVERY wall that has not been
    given one of its own — so one picture dresses the whole cabinet, and a wall
    with a deliberate background still wins on its own row. Reserved-key note:
-   per-wall keys are numeric strings or 'custom', so 'all' can never collide. */
+   per-wall keys are WALL NAMES or 'custom', and no wall is named 'all' or
+   'custom' (pinned in the suite), so the reserved keys can never collide. */
 const BG_ALL='all';
 function bgEntry(){ return bgMap[bgKey()] || bgMap[BG_ALL] || null; }
 function bgIsHouse(){ return !bgMap[bgKey()] && !!bgMap[BG_ALL]; }

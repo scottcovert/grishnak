@@ -533,7 +533,92 @@ THEMES.causeway.maze=MAZE_CAUSEWAY;
 THEMES.shipyard.maze=MAZE_SHIPYARD;
 THEMES.summit.maze=MAZE_SUMMIT;
 THEMES.hearth.maze=MAZE_HEARTH;
-const THEME_ORDER=['classic','egypt','grove','foundry','causeway','shipyard','summit','hearth','quad','oldone'];
+/* --- THE SWAMP (Scott, 2026-08-25) --------------------------------------
+   The first theme that changes the VERB rather than the paint. You are a
+   frog. When the flies turn blue, any one of them standing within TONGUE_R
+   cells on a CLEAR STRAIGHT LINE is taken — no aiming, no button. Blue time
+   stops being a chase and becomes a hunt: the question is no longer "can I
+   catch one" but "where do I stand so the lanes are full".
+   Automatic on purpose. An aimed tongue would be a different game (a skill
+   test); automatic keeps the existing fright loop and makes POSITION the
+   skill, which is what a maze is already about. */
+THEMES.swamp={
+  name:'THE SWAMP',
+  sky:['#101c14','#223a24'],
+  floor:'#1d2c1f', floorAlt:'#243626', floorEdge:'rgba(150,220,140,.05)',
+  stud:'rgba(120,180,110,.28)',
+  wallTop:'#4e7a4a', wallTopLit:'#86b878', wallFace:'#33512f', wallDark:'#1b2e1a',
+  wallRound:9,
+  dot:'#cfe8a0', dotGlow:'rgba(190,230,140,.5)',
+  pellet:'#a8f0d0', pelletGlow:'rgba(150,240,200,.75)',
+  bonus:{name:'DRAGONFLY', score:300, draw:drawDragonfly},
+  tongue:true, wet:true,
+  hint:'When they turn blue, stand where the lanes are full. The tongue does the rest.'
+};
+const TONGUE_R=5;          // cells of reach, Scott's number
+let tongues=[];            // {r,c,tr,tc,t} — drawn, then forgotten
+
+/* --- THE CARPETS (Scott, 2026-08-25) ------------------------------------
+   "Arabic night time purple at top, daytime bazaar at bottom." The sky runs
+   the whole day in one screen: deep night at the zenith down to a hot
+   market noon at the horizon. Player is a man on a carpet of a clearly
+   different colour; the monsters are bare carpets with eyes.
+   Everything here is CODE-DRAWN. A carpet is flat, so it needs no facing
+   art at all — one shape, rotated by heading, which is the cheapest cast in
+   the game and the reason this theme was worth doing early. */
+THEMES.carpet={
+  name:'THE NIGHT MARKET',
+  sky:['#160b32','#f0a64e'],               // night zenith -> bazaar noon, one screen
+  floor:'#2a1c44', floorAlt:'#33224f', floorEdge:'rgba(255,210,140,.05)',
+  stud:'rgba(255,190,110,.22)',
+  wallTop:'#c98a3c', wallTopLit:'#ffd08a', wallFace:'#8a5626', wallDark:'#4e2f14',
+  wallRound:5,
+  dot:'#ffe0a0', dotGlow:'rgba(255,200,110,.55)',
+  pellet:'#9fd8ff', pelletGlow:'rgba(150,210,255,.75)',
+  bonus:{name:'LAMP', score:300, draw:drawLamp},
+  carpet:true
+};
+
+/* the four monster carpets, in GHOST_DEF order so weave matches personality */
+const RUGS=[
+  {warp:'#b8342c', weft:'#f0a84c', eye:'#fff0c8'},   // ember
+  {warp:'#1f6f5a', weft:'#7fd8b0', eye:'#eafff4'},   // verdigris
+  {warp:'#3a4a68', weft:'#93a8cc', eye:'#e8f0ff'},   // iron
+  {warp:'#6a5a44', weft:'#ddc9a4', eye:'#fffaf0'}    // bone
+];
+const RUG_PLAYER={warp:'#5a2a8c', weft:'#c89bff'};   // clearly not one of them
+
+/* --- THE MUSHROOM WOOD (Scott, 2026-08-25) ------------------------------
+   "like a 5000 point reward with a price to pay." The only pickup in the
+   game that costs you: the bonus pays 5000 and then the screen stops
+   telling the truth for a while. THE ONE LAW, stated where it cannot be
+   missed: distort the PRESENTATION, never the collision grid and never the
+   monster AI. The maze stays exactly the maze; the difficulty comes from
+   your eyes, not from the rules changing under you. A player who dies to a
+   lie stops trusting the game.
+   Everything below is the velocity-not-value trick from THE GELATIN: slow
+   sines with drifting phase, so the world swims instead of flickering, and
+   the whole thing ramps in and out instead of snapping. */
+THEMES.shroom={
+  name:'THE MUSHROOM WOOD',
+  sky:['#170e26','#35204a'],
+  floor:'#251a2e', floorAlt:'#2b2036', floorEdge:'rgba(216,170,240,.05)',
+  stud:'rgba(200,150,220,.30)',
+  wallTop:'#8a5aa8', wallTopLit:'#c99ae0', wallFace:'#5c3a74', wallDark:'#331f44',
+  wallRound:8,
+  dot:'#ffd9e8', dotGlow:'rgba(255,190,220,.5)',
+  pellet:'#d8ffb0', pelletGlow:'rgba(190,255,150,.8)',
+  bonus:{name:'MUSHROOM', score:5000, draw:drawMushroom},
+  trip:true,
+  hint:'The red ones are worth five thousand. There is a reason.'
+};
+/* the trip: TRIP_T frames from the bite. tripA() is the amount — a ~2.5s
+   ramp in (you feel it come on) and a ~2s ramp out (survivable is the
+   ramp-out's whole job). */
+let tripT=0; const TRIP_T=780;
+const tripA=()=> tripT<=0? 0 : Math.min(1, (TRIP_T-tripT)/150, tripT/120);
+
+const THEME_ORDER=['classic','egypt','grove','swamp','shroom','foundry','causeway','shipyard','summit','hearth','quad','carpet','oldone'];
 let th=THEMES.classic;
 
 /* ---------------- state ---------------- */
@@ -632,7 +717,7 @@ function loadLevel(n){
   }
   oldBeam=null; oldFreeze=0; oldFlee=0; oldMirror=0; oldBlack=0; oldStun=0;
   quakeT=0; laserCd=150; oldHits=0; oldSulk=false;
-  frightT=0; chain=0; bonusStage=0;
+  frightT=0; chain=0; bonusStage=0; tongues=[]; tripT=0;
   introT=90; dyingT=0; doneT=0;
   camWY=Math.max(camMin(), Math.min(CAM_MAX, (pac.r+0.5)*TH));
 }
@@ -710,6 +795,11 @@ function collect(){
     if(th.oldone){ oldLetter(letter); }
     else {
       frightT=FRIGHT_T;
+      /* every screen turns them, unless the screen says otherwise. `cozy` is
+         exactly such a screen — the hearth cats come TO you on cream, so
+         turning them away would undo the one joke that screen tells. */
+      if(!th.noReverse && !th.cozy)
+        for(const g of ghosts) if(g.eatenT===0 && !inPen(g.r,g.c)) g.rev=1;
       if(th.cozy){                     // a saucer of cream — the cats come to YOU
         sfx.heart && sfx.heart();
         float((pac.c+0.5)*TW, (pac.r+0.5)*TH, 'cream!', '#fff2dc');
@@ -732,6 +822,9 @@ function collect(){
       score+=th.bonus.score; res.gold=Math.min(999,res.gold+15);
       float((pac.c+0.5)*TW, (pac.r+0.5)*TH, th.bonus.name+' +'+th.bonus.score, '#ffd23f');
       sfx.chest && sfx.chest(); bonuses.splice(i,1);
+      /* the other half of the deal. No announcement — the ramp-in IS the
+         announcement, which is the whole reason it has one. */
+      if(th.trip) tripT=TRIP_T;
     }
   }
   if(dots.size===0 && pellets.size===0) finish();
@@ -838,6 +931,19 @@ function ghostTick(g){
   if(g.eatenT>0 && g.r===HOUSE[0].r && g.c===HOUSE[0].c){
     g.eatenT=0; g.frightened=false; g.penT=90;
   }
+  /* THE ABOUT-FACE (Scott, 2026-08-25: "on all levels have monsters reverse
+     when power pellets are eaten unless there are overriding per-screen
+     instructions"). The arcade original turned them on the spot; this engine
+     decides direction at tile boundaries, so the turn lands at the next one —
+     a frame or two later, and far safer than flipping a part-crossed entity.
+     Consumed once, and only if the way back is actually open. */
+  if(g.rev){
+    g.rev=0;
+    const back={x:-g.dir.x, y:-g.dir.y};
+    if((back.x||back.y) && !blocked(g.r+back.y, g.c+back.x, true) && !inPen(g.r,g.c)){
+      g.dir=back; return;
+    }
+  }
   /* leaving the house is special-cased: greedy no-reverse steering can never
      take the door (v1 shipped that bug — the ghosts paced the pen forever) */
   let tgt, allowReverse=false;
@@ -903,6 +1009,30 @@ function collisions(){
     }
     return;
   }
+  /* THE TONGUE. Range + clear line, then it is simply taken — the same
+     scoring chain as touching one, because it IS eating one; only the reach
+     changed. Walls stop it, so a fly two cells away round a corner is safe
+     and a fly five cells down an open lane is not. */
+  if(th.tongue && frightT>0){
+    for(const g of ghosts){
+      if(g.eatenT>0 || g.penT>0 || !g.frightened) continue;
+      const dr=g.r-pac.r, dc=g.c-pac.c;
+      if(dr!==0 && dc!==0) continue;                 // orthogonal lanes only
+      const d=Math.abs(dr)+Math.abs(dc);
+      if(d===0 || d>TONGUE_R) continue;
+      const sr=Math.sign(dr), sc=Math.sign(dc);
+      let clear=true;
+      for(let i=1;i<d && clear;i++)
+        if(isWall(pac.r+sr*i, pac.c+sc*i)) clear=false;
+      if(!clear) continue;
+      const val=Math.min(1600, 200*Math.pow(2,chain)); chain++;
+      score+=val; g.eatenT=1; g.frightened=false;
+      g.tired=false; g.rest=0; g.climb=0;
+      tongues.push({r:pac.r, c:pac.c, tr:g.r, tc:g.c, t:34});
+      float((g.c+0.5)*TW, (g.r+0.5)*TH, '+'+val, val>=800?'#ffe066':'#bfeffc');
+      sfx.chest && sfx.chest();
+    }
+  }
   for(const g of ghosts){
     if(g.eatenT>0 || g.penT>0) continue;
     if(th.oldone && (oldFreeze>0 || oldStun>0)) continue;  // inert: walk straight through
@@ -934,6 +1064,7 @@ function afterDeath(){
     g.climb=0; g.tired=false; g.rest=0; }
   oldBeam=null; oldFreeze=0; oldFlee=0; oldMirror=0; oldBlack=0; oldStun=0; quakeT=0; laserCd=150;
   frightT=0; chain=0;
+  tripT=0;      // dying mid-trip ends it — the death already collected the price
 }
 function finish(){
   doneT=150; sfx.win && sfx.win();
@@ -1023,6 +1154,8 @@ function update(){
   if(introT>0) return;
 
   if(frightT>0){ frightT--; if(frightT===0) for(const g of ghosts) g.frightened=false; }
+  if(tripT>0) tripT--;
+  for(let i=tongues.length-1;i>=0;i--) if(--tongues[i].t<=0) tongues.splice(i,1);
   if(th.oldone){
     if(oldFreeze>0)oldFreeze--; if(oldMirror>0)oldMirror--; if(oldBlack>0)oldBlack--;
     if(oldStun>0)oldStun--; if(quakeT>0)quakeT--; if(oldFlee>0)oldFlee--;
@@ -1167,9 +1300,20 @@ function depth(wy){ return D0 + (camWY + VS - wy); }
 function flipX(wy){ return camX - (camWY + VS - wy)*SKEW; }
 function proj(wx, wy, wz){
   const d=depth(wy), s=F/d;
-  return { x: CX + ((wx-camX) + (camWY + VS - wy)*SKEW)*s,
-           y: HOR + (CAMH-(wz||0))*s,
-           s };
+  let x= CX + ((wx-camX) + (camWY + VS - wy)*SKEW)*s;
+  let y= HOR + (CAMH-(wz||0))*s;
+  /* THE TRIP warps here, at the single throat every drawn point passes
+     through — floor corners, wall tops, dots, monsters, you — so the whole
+     world bends as ONE jelly and nothing detaches from anything else.
+     World-anchored (keyed on wx,wy), two sines per axis at unrelated
+     frequencies, all of them slow. The GAME's positions never touch this:
+     collision, targeting and camera run on world coordinates upstream. */
+  const A=tripA();
+  if(A>0){
+    x += (Math.sin(wy*0.021+frame*0.031) + 0.5*Math.sin(wx*0.017-frame*0.023))*9*A;
+    y += (Math.sin(wx*0.019+frame*0.027) + 0.5*Math.sin(wy*0.023-frame*0.021))*7*A;
+  }
+  return { x, y, s };
 }
 /* an entity's smooth (mid-step) world position, projected */
 function scrEnt(e, wz){
@@ -1223,6 +1367,76 @@ function drawCherry(g,x,y,s){
     GFX.body(g,cx,cy,5.6,5.6,'#ff4d5a','#a81028');
     g.fillStyle='rgba(255,255,255,.6)';
     g.beginPath(); g.ellipse(cx-2,cy-2.2,1.8,1.2,-0.5,0,7); g.fill();
+  }
+  g.restore();
+}
+/* THE LAMP — the night market's bonus. Brass body, a flame that never sits
+   still, and no face on it. */
+function drawLamp(g,x,y,s){
+  const f=Math.sin(frame*0.22)*0.5+0.5;
+  g.save(); g.translate(x,y); g.scale(s,s);
+  const bg=g.createLinearGradient(-9,-4,9,6);
+  bg.addColorStop(0,'#ffd98a'); bg.addColorStop(1,'#a86a1e');
+  g.fillStyle=bg;
+  g.beginPath();
+  g.moveTo(-9,3); g.quadraticCurveTo(-8,-5,0,-5); g.quadraticCurveTo(8,-5,9,3);
+  g.quadraticCurveTo(0,7,-9,3); g.closePath(); g.fill();
+  g.strokeStyle='#4e2f14'; g.lineWidth=1.2; g.stroke();
+  g.beginPath(); g.moveTo(9,1); g.lineTo(15,-2); g.lineTo(15,1); g.lineTo(9,3);
+  g.closePath(); g.fill(); g.stroke();
+  g.strokeStyle='#a86a1e'; g.lineWidth=1.6;
+  g.beginPath(); g.arc(-7,-1,4.2,-0.4,2.6); g.stroke();
+  g.fillStyle='rgba(255,220,140,'+(0.45+0.35*f).toFixed(2)+')';
+  g.beginPath(); g.ellipse(15,-4-f*1.6,2.4,4.2+f*1.8,0,0,7); g.fill();
+  g.restore();
+}
+/* THE DRAGONFLY — the swamp's bonus. Wings beat, so it reads as alive at a
+   glance even at sprite size; the body is the only still thing on it. */
+function drawDragonfly(g,x,y,s){
+  const w=Math.sin(frame*0.55)*0.55+0.45;
+  g.save(); g.translate(x,y); g.scale(s,s);
+  g.strokeStyle='rgba(190,240,255,.85)'; g.lineWidth=1.1;
+  g.fillStyle='rgba(180,235,255,.42)';
+  for(const sgn of [-1,1]){
+    g.save(); g.scale(sgn,1);
+    g.beginPath(); g.ellipse(5.5,-2.5,6.4,2.0*w+0.8,-0.35,0,7); g.fill(); g.stroke();
+    g.beginPath(); g.ellipse(5.0, 1.4,5.6,1.7*w+0.7, 0.30,0,7); g.fill(); g.stroke();
+    g.restore();
+  }
+  const bg=g.createLinearGradient(-8,0,9,0);
+  bg.addColorStop(0,'#7fe8b0'); bg.addColorStop(1,'#2f8f6a');
+  g.fillStyle=bg;
+  g.beginPath(); g.roundRect? g.roundRect(-9,-1.6,17,3.2,1.6) : g.rect(-9,-1.6,17,3.2);
+  g.fill();
+  g.strokeStyle='#123024'; g.lineWidth=1; g.stroke();
+  g.fillStyle='#bff0d4';
+  g.beginPath(); g.arc(8.4,0,2.9,0,7); g.fill();
+  g.strokeStyle='#123024'; g.lineWidth=1; g.stroke();
+  g.fillStyle='#123024';
+  g.beginPath(); g.arc(9.4,-1,0.9,0,7); g.fill();
+  g.restore();
+}
+/* THE MUSHROOM — red cap, white spots, and a slow breath. It is the most
+   money on any bonus in the game and it looks exactly like what it is;
+   nothing on this screen ever says the other half of the deal out loud. */
+function drawMushroom(g,x,y,s){
+  const br=1+0.06*Math.sin(frame*0.05);
+  g.save(); g.translate(x,y); g.scale(s*br,s*br);
+  g.fillStyle='#eee2c8';
+  g.beginPath();
+  g.moveTo(-3,-2); g.quadraticCurveTo(-2.4,6,-3.4,9);
+  g.lineTo(3.4,9); g.quadraticCurveTo(2.4,6,3,-2); g.closePath(); g.fill();
+  g.strokeStyle='rgba(60,30,20,.5)'; g.lineWidth=1; g.stroke();
+  const cg=g.createRadialGradient(-3,-8,1,0,-6,13);
+  cg.addColorStop(0,'#ff7a62'); cg.addColorStop(0.55,'#e03a2a'); cg.addColorStop(1,'#8e1812');
+  g.fillStyle=cg;
+  g.beginPath(); g.moveTo(-11,-3);
+  g.quadraticCurveTo(-11,-13,0,-13); g.quadraticCurveTo(11,-13,11,-3);
+  g.quadraticCurveTo(0,1,-11,-3); g.closePath(); g.fill();
+  g.strokeStyle='rgba(60,10,10,.6)'; g.lineWidth=1.3; g.stroke();
+  g.fillStyle='rgba(255,246,235,.92)';
+  for(const [dx,dy,rr] of [[-6,-7,1.7],[0,-10,2.1],[6,-6,1.6],[-2,-5,1.2],[4,-9.5,1.1]]){
+    g.beginPath(); g.ellipse(dx,dy,rr,rr*0.8,0,0,7); g.fill();
   }
   g.restore();
 }
@@ -1381,8 +1595,137 @@ function drawPie(g,x,y,s){
 }
 /* the Hearthside cats — same souls, different bodies */
 const CAT_COLS=['#e8945a','#9a9aa8','#4a4a54','#f0e0c8'];
-function drawCat(g,gh){
+/* A CARPET. One shape, rotated by heading — a rug has no front, so this is
+   the only cast in the game that needs no facing variants at all. It ripples
+   along its length as it flies; `rider` puts a man on it. */
+function drawRug(g,x,y,s,ang,rug,fr,rider){
+  g.save(); g.translate(x,y); g.scale(s,s); g.rotate(ang);
+  const L=17, W=11;
+  const rip=i=>Math.sin(frame*0.16 + i*0.9)*1.5;
+  g.beginPath();
+  g.moveTo(-L, -W+rip(0));
+  g.quadraticCurveTo(0, -W+rip(1)-2, L, -W+rip(2));
+  g.lineTo(L, W+rip(3));
+  g.quadraticCurveTo(0, W+rip(4)+2, -L, W+rip(5));
+  g.closePath();
+  const cg=g.createLinearGradient(-L,0,L,0);
+  cg.addColorStop(0, fr? '#2a3f8c' : rug.warp);
+  cg.addColorStop(1, fr? '#5f78d8' : rug.weft);
+  g.fillStyle=cg; g.fill();
+  g.strokeStyle='rgba(20,12,34,.9)'; g.lineWidth=1.4; g.stroke();
+  // the weave: a few cross-threads and a centre medallion
+  g.strokeStyle= fr? 'rgba(200,220,255,.5)' : 'rgba(255,240,200,.42)';
+  g.lineWidth=1;
+  for(let i=-2;i<=2;i++){
+    g.beginPath(); g.moveTo(i*6, -W+2+rip(i+2)*0.5); g.lineTo(i*6, W-2+rip(i+3)*0.5); g.stroke();
+  }
+  g.fillStyle= fr? 'rgba(190,215,255,.55)' : 'rgba(255,235,190,.5)';
+  g.beginPath(); g.ellipse(0,0,4.2,2.6,0,0,7); g.fill();
+  // tassels, both short ends
+  g.strokeStyle= fr? '#9fb4ff' : rug.weft;
+  g.lineWidth=1.2;
+  for(let e of [-1,1]) for(let i=-2;i<=2;i++){
+    g.beginPath(); g.moveTo(e*L, i*4); g.lineTo(e*(L+3.5), i*4+rip(i)*0.4); g.stroke();
+  }
+  if(rug.eye){                       // bare carpets watch you; the rider's does not
+    const ex= fr? 4 : 6;
+    g.fillStyle= fr? '#dfe8ff' : rug.eye;
+    g.beginPath(); g.arc(ex,-3.4,2.5,0,7); g.fill();
+    g.beginPath(); g.arc(ex, 3.4,2.5,0,7); g.fill();
+    g.fillStyle='#140c22';
+    const lk= fr? 0 : 1;
+    g.beginPath(); g.arc(ex+lk,-3.4,1.2,0,7); g.fill();
+    g.beginPath(); g.arc(ex+lk, 3.4,1.2,0,7); g.fill();
+  }
+  g.restore();
+  if(rider){                         // drawn UNROTATED: he always sits upright
+    g.save(); g.translate(x, y-9*s); g.scale(s,s);
+    g.fillStyle='#e8c9a0';
+    g.beginPath(); g.arc(0,-7,4.6,0,7); g.fill();
+    g.strokeStyle='#3a2418'; g.lineWidth=1.2; g.stroke();
+    g.fillStyle='#f4f0e6';           // turban
+    g.beginPath(); g.ellipse(0,-10.4,5.6,3.4,0,0,7); g.fill(); g.stroke();
+    g.fillStyle='#c89bff';           // robe
+    g.beginPath();
+    g.moveTo(-5,0); g.quadraticCurveTo(-4.5,-4.4,0,-4.4);
+    g.quadraticCurveTo(4.5,-4.4,5,0); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle='#3a2418';
+    g.beginPath(); g.arc(-1.6,-7.2,0.9,0,7); g.fill();
+    g.beginPath(); g.arc( 1.6,-7.2,0.9,0,7); g.fill();
+    g.restore();
+  }
+}
+/* THE FLIES (Scott, 2026-08-25: "make those cats flies"). The swamp's four
+   hunters are flies now — small, quick-winged, easy meat, exactly what a
+   frog level wants. Personality lives in the COMPOUND EYES: each fly's eye
+   colour is its GHOST_DEF colour, so ember still reads as ember at a
+   glance. Blue time GROUNDS them — wings fold, they sit low on the road —
+   which is why a tongue can take them. */
+function drawFly(g,gh){
   const p=scrEnt(gh,2);
+  const fr=gh.frightened;
+  const flash= fr && frightT<120 && (frame>>3)%2;      // the classic warning
+  const down= fr && !flash;
+  const R=10.5*p.s;
+  const bz= down? 1.5 : 6+Math.sin(frame*0.23+gh.bob)*2.4;
+  const y=p.y-bz*p.s-R*0.4;
+  GFX.shadow(g, p.x, p.y, (down?7:4.5)*p.s, down?0.26:0.18);
+  // wings first, behind the body: a beat-blur airborne, folded flat when blue
+  const wb= down? 0.1 : Math.abs(Math.sin(frame*0.9+gh.bob));
+  g.fillStyle= down? 'rgba(150,170,215,.4)' : 'rgba(225,235,245,.32)';
+  for(const s2 of [-1,1]){
+    g.beginPath();
+    g.ellipse(p.x+s2*R*0.6, y-R*0.45, R*0.9, R*(0.16+0.34*wb),
+              s2*(down?1.1:0.45), 0, 7);
+    g.fill();
+  }
+  // dangling legs (tucked when grounded)
+  g.strokeStyle='rgba(18,14,10,.65)'; g.lineWidth=Math.max(0.8,1*p.s); g.lineCap='round';
+  if(!down) for(const s2 of [-1,1]) for(let i=0;i<2;i++){
+    const lx=p.x+s2*R*(0.25+i*0.3);
+    g.beginPath(); g.moveTo(lx, y+R*0.5);
+    g.lineTo(lx+s2*R*0.18, y+R*(0.85+0.1*Math.sin(frame*0.3+i+gh.bob)));
+    g.stroke();
+  }
+  // the body
+  const body= down? '#4a5a88' : '#2e2a26';
+  const bg=g.createRadialGradient(p.x-R*0.3, y-R*0.35, 1, p.x, y, R);
+  bg.addColorStop(0, GFX.lift(body,1.6));
+  bg.addColorStop(1, GFX.dim(body,0.6));
+  g.fillStyle=bg;
+  g.beginPath(); g.ellipse(p.x, y, R*0.85, R*0.68, 0, 0, 7); g.fill();
+  g.strokeStyle='rgba(8,6,4,.5)'; g.lineWidth=1; g.stroke();
+  g.strokeStyle='rgba(0,0,0,.30)';                      // abdomen bands
+  for(const bx of [0.05,0.35]){
+    g.beginPath(); g.arc(p.x-R*bx, y, R*0.62, Math.PI*0.6, Math.PI*1.4); g.stroke();
+  }
+  // compound eyes — the personality, one colour per hunter
+  const ec= down? '#9fb4ff' : gh.def.col;
+  for(const s2 of [-1,1]){
+    g.fillStyle=ec;
+    g.beginPath(); g.arc(p.x+s2*R*0.42, y-R*0.34, R*0.36, 0, 7); g.fill();
+    g.strokeStyle='rgba(8,6,4,.45)'; g.lineWidth=0.8; g.stroke();
+    g.fillStyle='rgba(255,255,255,.75)';
+    g.beginPath(); g.arc(p.x+s2*R*0.34, y-R*0.44, R*0.11, 0, 7); g.fill();
+  }
+}
+function drawCat(g,gh){
+  /* the photographed flies win once loaded; the code fly is the fallback,
+     exactly as the rugs and the rider are on the night market */
+  if(th.tongue && !(CASTS.swamp && castImage(CASTS.swamp.src)))
+    return drawFly(g,gh);
+  const p=scrEnt(gh,2);
+  /* the code-drawn rugs are the FALLBACK now — Scott's photographed sheet
+     wins the moment it has loaded, and this keeps the screen playable on the
+     first frame and on a browser that never fetches the atlas at all. */
+  if(th.carpet && !(CASTS.carpet && castImage(CASTS.carpet.src))){
+    const bob2=Math.sin(frame*0.07+gh.bob)*2.0*p.s;
+    const idx2=Math.max(0, GHOST_DEF.indexOf(gh.def));
+    const a2 = gh.dir.x>0? 0 : gh.dir.x<0? Math.PI : gh.dir.y>0? Math.PI/2 : gh.dir.y<0? -Math.PI/2 : 0;
+    GFX.shadow(g, p.x, p.y, 12*p.s, 0.22);
+    drawRug(g, p.x, p.y-10*p.s+bob2, p.s, a2, RUGS[idx2], gh.frightened, false);
+    return;
+  }
   const bob=Math.sin(frame*0.06+gh.bob)*1.4*p.s;
   const y=p.y-6*p.s+bob;
   GFX.shadow(g, p.x, p.y, 10*p.s, 0.26);
@@ -1553,6 +1896,35 @@ function drawFloor(g,r,c){
     const sn=Math.max(0,(elevOf(r)-4))*0.09;
     if(sn>0){ g.fillStyle='rgba(238,246,252,'+sn.toFixed(2)+')'; g.fill(); }
   }
+  /* MOIST ROADS — the floor half of the cozy-cell method. Same three rules:
+     hash-keyed so a cell is stable and its neighbour differs; the puddle is
+     allowed to cross the tile edge so the checkerboard stops reading as a
+     checkerboard; and the wet is a soft sheen PLUS one hard glint, because
+     one alone reads as fog and the pair reads as water. */
+  if(th.wet){
+    const pw=hash2(c*19+7, r*23+5);
+    if(pw>0.58){
+      const cx2=(a.x+c2.x)/2, cy2=(a.y+c2.y)/2;
+      const wpx=Math.abs(b.x-a.x)*(0.34+0.34*pw), hpx=Math.abs(d.y-a.y)*(0.30+0.26*pw);
+      const pg2=g.createRadialGradient(cx2,cy2,1,cx2,cy2,Math.max(2,wpx));
+      pg2.addColorStop(0,'rgba(120,170,150,.34)');
+      pg2.addColorStop(0.65,'rgba(90,140,125,.18)');
+      pg2.addColorStop(1,'rgba(90,140,125,0)');
+      g.fillStyle=pg2;
+      g.beginPath(); g.ellipse(cx2,cy2,Math.max(2,wpx),Math.max(1.2,hpx),0,0,7); g.fill();
+      g.fillStyle='rgba(220,255,240,.5)';
+      g.beginPath();
+      g.ellipse(cx2-wpx*0.22, cy2-hpx*0.25, Math.max(0.8,wpx*0.16), Math.max(0.5,hpx*0.2), 0,0,7);
+      g.fill();
+    }
+    if(pw<0.14){                       // a few wet leaves down in the road
+      const lx=(a.x+c2.x)/2 + (hash2(c*3,r*5)-0.5)*Math.abs(b.x-a.x)*0.5;
+      const ly=(a.y+c2.y)/2 + (hash2(c*9,r*7)-0.5)*Math.abs(d.y-a.y)*0.5;
+      g.fillStyle='rgba(96,132,72,.55)';
+      g.beginPath(); g.ellipse(lx,ly,Math.abs(b.x-a.x)*0.10+1, Math.abs(d.y-a.y)*0.09+0.8,
+                               hash2(c,r)*3,0,7); g.fill();
+    }
+  }
   g.strokeStyle=th.floorEdge; g.lineWidth=1; g.stroke();
   const hv=hash2(c*7+3, r*11+1);
   if(hv>0.82){
@@ -1612,6 +1984,57 @@ function drawWall(g,r,c){
   const tg=g.createLinearGradient(0,tNW.y,0,tSW.y);
   tg.addColorStop(0,th.wallTop); tg.addColorStop(1,th.wallTopLit);
   g.fillStyle=tg; g.fill();
+  /* --- WET VEGETATION (Scott, 2026-08-25) -------------------------------
+     "walls that look more like wet vegetation cells that tile pretty well,
+     moist roads." The COZY-CELL METHOD, and it is worth stating plainly
+     because the other games are going to reuse it:
+       1. Everything is keyed off hash2(c,r), so a cell looks the same every
+          frame and its NEIGHBOUR looks different. No noise texture, no
+          per-frame randomness, nothing to load.
+       2. Growth is drawn OVER the seam, hanging past the tile edge, which is
+          what stops a grid of identical squares reading as a grid.
+       3. The wet look is two highlights, not one: a broad soft sheen for the
+          damp, and a couple of small hard specks for standing droplets.
+     Cheap enough to run on every visible wall every frame. */
+  if(th.wet){
+    const h1=hash2(c*3+1, r*7+2), h2b=hash2(c*5+9, r*3+4), h3=hash2(c*11+5, r*13+7);
+    const cw2=(tSE.x-tSW.x), s2=tSW.s;
+    if(cw2>6){
+      // mossy clumps on the top face — three per cell, placed by hash
+      for(let i=0;i<3;i++){
+        const hx=hash2(c*7+i*31, r*5+i*17), hy=hash2(c*13+i*11, r*19+i*23);
+        const px=tSW.x+cw2*(0.16+0.68*hx);
+        const py=tNW.y+(tSW.y-tNW.y)*(0.18+0.64*hy);
+        const rr=(2.2+2.6*hash2(c+i*3, r+i*5))*s2;
+        g.fillStyle= i===1? 'rgba(150,196,110,.55)' : 'rgba(96,150,84,.5)';
+        g.beginPath(); g.ellipse(px,py,rr,rr*0.62,hx*3,0,7); g.fill();
+      }
+      // fronds breaking the SOUTH seam — the thing that kills the grid
+      g.strokeStyle='rgba(74,122,66,.85)'; g.lineWidth=Math.max(1,1.5*s2);
+      g.lineCap='round';
+      for(let i=0;i<4;i++){
+        const hx=hash2(c*17+i*7, r*23+i*13);
+        const bx=tSW.x+cw2*(0.10+0.80*hx), by=tSW.y;
+        const len=(4+5*hash2(c*5+i, r*7+i))*s2;
+        const lean=(hash2(c*29+i, r*31+i)-0.5)*7*s2;
+        g.beginPath(); g.moveTo(bx,by);
+        g.quadraticCurveTo(bx+lean*0.5, by+len*0.6, bx+lean, by+len);
+        g.stroke();
+      }
+      // the damp: one broad sheen...
+      const sg=g.createLinearGradient(tNW.x,tNW.y,tSW.x,tSW.y);
+      sg.addColorStop(0,'rgba(210,255,220,'+(0.06+0.10*h1).toFixed(3)+')');
+      sg.addColorStop(1,'rgba(210,255,220,0)');
+      g.fillStyle=sg; quad(g,tNW,tNE,tSE,tSW); g.fill();
+      // ...and two hard droplets, which is what actually reads as WET
+      g.fillStyle='rgba(235,255,245,.7)';
+      for(let i=0;i<2;i++){
+        const dx=tSW.x+cw2*(0.25+0.5*(i?h2b:h3));
+        const dy=tNW.y+(tSW.y-tNW.y)*(0.3+0.4*(i?h3:h2b));
+        g.beginPath(); g.arc(dx,dy,Math.max(0.7,1.1*s2),0,7); g.fill();
+      }
+    }
+  }
   // gloss + exposed-edge lines, scaled by depth
   if(!isWall(r+1,c)||!isWall(r,c+1)||!isWall(r,c-1)){
     g.fillStyle='rgba(255,255,255,.22)';
@@ -1638,11 +2061,29 @@ function drawDot(g,r,c){
   const gl=g.createRadialGradient(p.x,p.y,0.5,p.x,p.y,8*p.s);
   gl.addColorStop(0,th.dotGlow); gl.addColorStop(1,'rgba(0,0,0,0)');
   g.fillStyle=gl; g.beginPath(); g.arc(p.x,p.y,8*p.s,0,7); g.fill();
-  g.fillStyle=th.dot; g.beginPath(); g.arc(p.x,p.y,2.8*p.s,0,7); g.fill();
+  /* under the influence, every dot is a five-petalled flower, and the whole
+     field of them turns together, very slowly. Presentation only — the tile
+     underneath is the same dot it always was. */
+  const A=tripA();
+  if(A>0.25){
+    g.fillStyle=th.dot;
+    const spin=frame*0.013+(r*7+c*13)*0.6;
+    for(let i=0;i<5;i++){
+      const a2=i/5*Math.PI*2+spin;
+      g.beginPath();
+      g.ellipse(p.x+Math.cos(a2)*3.2*p.s*A, p.y+Math.sin(a2)*3.2*p.s*A,
+                2.1*p.s*A, 1.2*p.s*A, a2, 0, 7);
+      g.fill();
+    }
+    g.fillStyle='#ffd23f';
+    g.beginPath(); g.arc(p.x,p.y,1.9*p.s,0,7); g.fill();
+  } else {
+    g.fillStyle=th.dot; g.beginPath(); g.arc(p.x,p.y,2.8*p.s,0,7); g.fill();
+  }
 }
 function drawPellet(g,r,c){
   const p=proj(tileWX(c)+TW/2, tileWY(r)+TH/2, 4+EV(r));
-  const pu=0.6+0.4*Math.sin(frame*0.13+c);
+  const pu=0.6+0.4*Math.sin(frame*(0.13+0.09*tripA())+c);
   const gl=g.createRadialGradient(p.x,p.y,1,p.x,p.y,17*p.s);
   gl.addColorStop(0,th.pelletGlow); gl.addColorStop(1,'rgba(0,0,0,0)');
   g.globalAlpha=pu; g.fillStyle=gl; g.beginPath(); g.arc(p.x,p.y,17*p.s,0,7); g.fill(); g.globalAlpha=1;
@@ -1691,6 +2132,44 @@ const CAT_CAST={src:'images/waka-cast-cats.png?v=2026082404',
  ],
  fm:[[{x:252,y:2,w:122,h:150,k:0.95}],[{x:622,y:2,w:121,h:150,k:0.95}],
      [{x:999,y:2,w:125,h:150,k:0.95}],[{x:1391,y:2,w:127,h:150,k:0.95}]]};
+/* Scott's photographed carpets. Sliced by CONNECTED COMPONENT, not on the
+   usual 4x2 grid: these are posed on a diagonal, so carpet 1's lower-right
+   and carpet 2's upper-left share x-range without ever touching — measured,
+   only ONE clear vertical gap per row — and a rigid W//4 cut halves two of
+   the four. Blob boxes do not care how a thing leans.
+   Monsters only; the rider stays code-drawn, so castFor() finds no `player`
+   here and drawPac falls through to the rug it already draws. */
+CASTS.carpet={src:'images/waka-cast-market.png?v=2026082507',
+ m:[
+  [{x:2,y:2,w:179,h:150,k:1.0},{x:183,y:2,w:182,h:150,k:1.0}],
+  [{x:548,y:2,w:164,h:150,k:1.0},{x:714,y:2,w:182,h:150,k:1.0}],
+  [{x:1064,y:2,w:169,h:150,k:1.0},{x:1235,y:2,w:187,h:150,k:1.0}],
+  [{x:1595,y:2,w:170,h:150,k:1.0},{x:1767,y:2,w:188,h:150,k:1.0}]
+ ],
+ fm:[[{x:367,y:2,w:179,h:150,k:1.0}],[{x:898,y:2,w:164,h:150,k:1.0}],
+     [{x:1424,y:2,w:169,h:150,k:1.0}],[{x:1957,y:2,w:170,h:150,k:1.0}]],
+ /* THE RIDER, packed into the SAME sheet because castFor() resolves one
+    `src` per theme. His side pair is stored facing RIGHT and the engine
+    mirrors it for leftward travel — which cost three passes to get right,
+    because a 150px strip is unreadable and the eye simply guesses. Check a
+    facing by rendering the PACKED cell at zoom, never from the source sheet
+    and never from the strip. */
+ player:      [{x:2131,y:2,w:148,h:150,k:1.1},{x:2281,y:2,w:145,h:150,k:1.1}],
+ playerFront: [{x:2428,y:2,w:143,h:150,k:1.1},{x:2573,y:2,w:149,h:150,k:1.1}],
+ playerBack:  [{x:2724,y:2,w:146,h:150,k:1.1}]};
+/* THE FLIES, photographed (Scott, 2026-08-25: "bigger and clearer... like a
+   top down view of a house fly. Sprites would be fine, non animated cool").
+   FIRST FULLY-INTERNAL CAST: prompt written, generated via nano banana,
+   examined, keyed and packed with no human in the loop. Non-animated by
+   Scott's word — one cell per fly, one blue cell each for fright. Keying
+   note: flood-fill from the border over green-dominance, because the teal
+   fly's eyes are the verdigris lesson in a new hat — enclosed by the head,
+   so connectivity saves what a bare hue test would eat. */
+CASTS.swamp={src:'images/waka-cast-swamp.png?v=2026082510',
+ m:[[{x:2,y:2,w:143,h:150,k:0.9}],[{x:147,y:2,w:143,h:150,k:0.9}],
+    [{x:292,y:2,w:143,h:150,k:0.9}],[{x:437,y:2,w:141,h:150,k:0.9}]],
+ fm:[[{x:580,y:2,w:143,h:150,k:0.9}],[{x:725,y:2,w:143,h:150,k:0.9}],
+     [{x:870,y:2,w:142,h:150,k:0.9}],[{x:1014,y:2,w:141,h:150,k:0.9}]]};
 /* THE BOY (Scott's head sheet, 2026-08-24) — the valley's player on the
    CLASSIC screen, on trial against the rat that still runs every other theme.
    Just a head, which is the honest form for a maze-chase: the original ghosts
@@ -1754,6 +2233,87 @@ function drawCastCell(g,cast,cells,x,y,s,flip,fr){
   g.drawImage(cast.img,c.x,c.y,c.w,c.h,-w/2,-h,w,h); g.restore();
   return true;
 }
+/* the player, under the influence: googly eyes whose pupils orbit on two
+   UNRELATED clocks — the disagreement is what reads as googly — and a
+   slightly downturned mouth. He is having a time. Drawn unrotated over
+   whatever body the theme gave him, because the face is the state, not
+   the costume. */
+function tripFace(g,x,y,s){
+  const A=tripA(); if(A<=0.05) return;
+  for(const sg2 of [-1,1]){
+    const ex=x+sg2*5.4*s, ey=y-19*s;
+    g.fillStyle='#fff';
+    g.beginPath(); g.arc(ex,ey,4.4*s,0,7); g.fill();
+    g.strokeStyle='rgba(24,12,32,.75)'; g.lineWidth=1.1; g.stroke();
+    const a2=frame*(sg2<0?0.083:0.059)+sg2*1.7;
+    g.fillStyle='#1a1024';
+    g.beginPath(); g.arc(ex+Math.cos(a2)*2.2*s*A, ey+Math.sin(a2)*2.2*s*A, 1.8*s, 0, 7); g.fill();
+  }
+  g.strokeStyle='#2a1626'; g.lineWidth=1.7*s; g.lineCap='round';
+  g.beginPath(); g.arc(x, y-8*s, 3.6*s, Math.PI*1.16, Math.PI*1.84); g.stroke();
+}
+/* THE FROG (Scott, 2026-08-25: "build the frog player sprites"). Code-drawn
+   like the rat, and for the rat's reason: it rotates to its heading, so one
+   drawing covers four directions. The hop cycle is the character — a frog
+   does not walk, so while moving the body stretches along its axis and the
+   big rear legs kick out behind; at rest it sits tall and folded. */
+function drawFrogPlayer(g,p,a,jf){
+  const R=13*p.s*(1+0.35*jf);
+  const moving=(pac.dir.x||pac.dir.y);
+  const hop= moving? Math.abs(Math.sin(frame*0.32)) : 0;
+  const y=p.y-R*0.42-hop*3*p.s;
+  g.save(); g.translate(p.x,y); g.rotate(a);
+  const st=1+0.22*hop, sw=1-0.12*hop;          // stretch to hop, thin to match
+  // rear legs — folded Z at rest, kicked straight back mid-hop
+  g.strokeStyle='#3f7a2e'; g.lineWidth=3.2*p.s; g.lineCap='round';
+  for(const s2 of [-1,1]){
+    const hipX=-R*0.55*st, hipY=s2*R*0.42*sw;
+    g.beginPath(); g.moveTo(hipX,hipY);
+    if(hop>0.3){
+      g.lineTo(hipX-R*0.55*hop, hipY+s2*R*0.18);
+      g.lineTo(hipX-R*(0.55*hop+0.4), hipY+s2*R*0.05);
+    } else {
+      g.lineTo(hipX-R*0.15, hipY+s2*R*0.30);
+      g.lineTo(hipX+R*0.10, hipY+s2*R*0.42);
+    }
+    g.stroke();
+  }
+  // body — dark olive back over a pale belly edge
+  const bg=g.createRadialGradient(-R*0.2,-R*0.25,1,0,0,R*1.15);
+  bg.addColorStop(0,'#8cc85a'); bg.addColorStop(0.5,'#5a9c3c'); bg.addColorStop(1,'#33641f');
+  g.fillStyle=bg;
+  g.beginPath(); g.ellipse(0,0,R*0.95*st,R*0.72*sw,0,0,7); g.fill();
+  g.strokeStyle='rgba(20,40,12,.55)'; g.lineWidth=1.3; g.stroke();
+  g.fillStyle='rgba(232,240,192,.5)';                    // belly showing at the jaw
+  g.beginPath(); g.ellipse(R*0.45*st,0,R*0.42,R*0.40*sw,0,0,7); g.fill();
+  g.fillStyle='rgba(30,60,18,.4)';                       // back spots
+  for(const [dx,dy,rr] of [[-R*0.35,-R*0.22,0.14],[-R*0.05,R*0.25,0.11],[R*0.1,-R*0.3,0.10]]){
+    g.beginPath(); g.arc(dx,dy,R*rr,0,7); g.fill();
+  }
+  // front feet, planted wide
+  g.strokeStyle='#3f7a2e'; g.lineWidth=2.2*p.s;
+  for(const s2 of [-1,1]){
+    g.beginPath(); g.moveTo(R*0.5*st, s2*R*0.35*sw);
+    g.lineTo(R*(0.72+0.1*hop), s2*R*0.55); g.stroke();
+  }
+  // the eyes — two bulbs on top, pupils forward. This is the whole face.
+  for(const s2 of [-1,1]){
+    g.fillStyle='#5a9c3c';
+    g.beginPath(); g.arc(R*0.55*st, s2*R*0.46*sw, R*0.30, 0, 7); g.fill();
+    g.strokeStyle='rgba(20,40,12,.5)'; g.lineWidth=1; g.stroke();
+    g.fillStyle='#f2f6da';
+    g.beginPath(); g.arc(R*0.60*st, s2*R*0.46*sw, R*0.20, 0, 7); g.fill();
+    g.fillStyle='#1c2410';
+    g.beginPath(); g.ellipse(R*0.66*st, s2*R*0.46*sw, R*0.09, R*0.13, 0, 0, 7); g.fill();
+    g.fillStyle='rgba(255,255,255,.8)';
+    g.beginPath(); g.arc(R*0.62*st, s2*R*0.51*sw, R*0.05, 0, 7); g.fill();
+  }
+  // mouth line along the jaw
+  g.strokeStyle='rgba(20,40,12,.6)'; g.lineWidth=1.1;
+  g.beginPath(); g.arc(R*0.3*st, 0, R*0.55, -0.5, 0.5); g.stroke();
+  g.restore();
+  tripFace(g,p.x,p.y,p.s);
+}
 function drawPac(g){
   const gz=pac.z*ZSCALE;
   const p=scrEnt(pac, gz);
@@ -1764,6 +2324,15 @@ function drawPac(g){
   let a=0;
   if(pac.dir.x>0) a=0; else if(pac.dir.x<0) a=Math.PI;
   else if(pac.dir.y>0) a=Math.PI/2; else if(pac.dir.y<0) a=-Math.PI/2;
+  /* the code-drawn rider is the FALLBACK now, exactly as the rugs are: the
+     photographed sheet wins once it has loaded, and this keeps the screen
+     playable on frame one and on a browser that never fetches the atlas. */
+  if(th.carpet && !(CASTS.carpet && castImage(CASTS.carpet.src))){
+    const bobP=Math.sin(frame*0.07)*1.6*p.s;
+    drawRug(g, p.x, p.y-10*p.s+bobP-gz*0.6, p.s*(1+0.25*jf), a, RUG_PLAYER, false, true);
+    return;
+  }
+  if(th.tongue){ drawFrogPlayer(g,p,a,jf); return; }
   const R=14*p.s*(1+0.4*jf);                   // swells toward the apex
   const y=p.y-R*0.5;
   if(jf>0.04){                                  // and glows on the way up
@@ -1782,7 +2351,7 @@ function drawPac(g){
     let cells=cast.def.player, flip=pac.dir.x<0;
     if(!pac.dir.x && pac.dir.y>0 && cast.def.playerFront){ cells=cast.def.playerFront; flip=false; }
     else if(!pac.dir.x && pac.dir.y<0 && cast.def.playerBack){ cells=cast.def.playerBack; flip=false; }
-    if(drawCastCell(g,cast,cells,p.x,p.y,p.s*(1+0.4*jf),flip,false)) return;
+    if(drawCastCell(g,cast,cells,p.x,p.y,p.s*(1+0.4*jf),flip,false)){ tripFace(g,p.x,p.y,p.s); return; }
   }
   /* THE RAT (Scott, 2026-08-23: "do cellar cats"). The wedge-mouthed disc is
      gone: the valley's player is a larder rat — quick, low, unglamorous, and
@@ -1825,6 +2394,7 @@ function drawPac(g){
   g.beginPath(); g.ellipse(R*0.35+scur*1.4,R*0.6,2.2*p.s,1.4*p.s,0,0,7); g.fill();
   g.beginPath(); g.ellipse(-R*0.5-scur*1.4,R*0.62,2.2*p.s,1.4*p.s,0,0,7); g.fill();
   g.restore();
+  tripFace(g,p.x,p.y,p.s);
 }
 function drawOldOne(g,gh){
   const p=scrEnt(gh, 2);
@@ -1897,6 +2467,24 @@ function drawGhost(g,gh){
     drawSteelEyes(g,p.x,y,gh,p.s);
     return;
   }
+  /* THE TRIP, on the monsters — Scott: "especially monsters". THE GELATIN's
+     area-conserving squash (one axis stretched, the other pinched by the
+     same factor, so mass reads as conserved and it looks like flesh, not a
+     glitch) plus a slow lean, all phased off gh.bob so no two of them ever
+     agree. Wrapped around the WHOLE draw: sprite cast and code cat alike. */
+  const A=tripA();
+  if(A>0){
+    const p=scrEnt(gh, 2);
+    const w1=Math.sin(frame*0.045+gh.bob*2.1), w2=Math.sin(frame*0.037+gh.bob*3.3);
+    const sq=1+0.22*A*w1;
+    g.save(); g.translate(p.x,p.y);
+    g.rotate(w2*0.16*A);
+    g.scale(sq, 1/sq);
+    g.translate(-p.x,-p.y);
+    drawCat(g,gh);
+    g.restore();
+    return;
+  }
   return drawCat(g,gh);
 }
 function drawSteelEyes(g,x,y,gh,s){
@@ -1921,7 +2509,10 @@ function drawEyes(g,x,y,gh,s){
 /* ---------------- draw ---------------- */
 function rowVisible(r){
   const n=proj(camX, tileWY(r), WZ+EV(r)).y, s2=proj(camX, tileWY(r)+TH, EV(r)).y;
-  return s2>HUD-10 && n<HUD+RH+30;
+  /* the trip warp can push a row's projected edge ~16px either way; widen
+     the cull by the warp's worst case so rows never pop at the screen edge */
+  const m=40*tripA();
+  return s2>HUD-10-m && n<HUD+RH+30+m;
 }
 function draw(){
   const g=ctx;
@@ -2013,6 +2604,64 @@ function draw(){
     gl.addColorStop(1,'rgba(255,235,140,0)');
     g.fillStyle=gl; g.beginPath(); g.arc(p.x,p.y-6,20*p.s,0,7); g.fill();
   }
+  /* THE TONGUE, animated (Scott, 2026-08-25: "animate the (thick) tongue").
+     The STRIKE is still resolved before you see anything — that stays, it is
+     how a frog's tongue works — but the drawing now plays it back: out in 5
+     frames, held for 5, reeled in over 12, with a slight sag under its own
+     weight. Thick pink over a darker rim, a wet highlight down the middle,
+     and a blob of a tip. The point is that the credit now LOOKS earned. */
+  for(const tg of tongues){
+    const age=34-tg.t;
+    const ext= age<5? age/5 : tg.t>14? 1 : tg.t/14;    // out fast, HELD, reel back
+    /* proj(), NOT scrEnt(): a tongue record is {r,c,timer} — scrEnt reads
+       e.dir and e.t off it, and there IS no dir while t is the TIMER, so it
+       threw on the first strike, the tongue never rendered, and the skipped
+       g.restore() leaked this frame's CLIP onto the shared canvas — which is
+       what blacked out Stonebreaker's HUD two cabinets later. One bad call,
+       two games' bugs. */
+    const A=proj((tg.c+0.5)*TW, (tg.r+0.5)*TH, EV(tg.r)),
+          B=proj((tg.tc+0.5)*TW, (tg.tr+0.5)*TH, EV(tg.tr));
+    const sc=A.s, my=A.y-8;
+    const tx=A.x+(B.x-A.x)*ext, ty=my+((B.y-8)-my)*ext;
+    const sag=7*sc*ext;                                 // it droops when long
+    const mx=(A.x+tx)/2, cy=(my+ty)/2+sag;
+    if(tg.t<5) g.globalAlpha=tg.t/5;
+    g.lineCap='round';
+    /* Scott, 2026-08-25: "tongue needs to stand out way more." A soft glow
+       under it, then a fat crimson rim, then the tongue, then the wet — the
+       one hot pink thing on an all-green screen, unmissable on purpose. */
+    g.strokeStyle='rgba(255,200,225,.30)'; g.lineWidth=16*sc;   // the glow
+    g.beginPath(); g.moveTo(A.x,my); g.quadraticCurveTo(mx,cy,tx,ty); g.stroke();
+    g.strokeStyle='#8e1838'; g.lineWidth=11*sc;         // the rim
+    g.beginPath(); g.moveTo(A.x,my); g.quadraticCurveTo(mx,cy,tx,ty); g.stroke();
+    g.strokeStyle='#ff5c8a'; g.lineWidth=7.5*sc;        // the tongue
+    g.beginPath(); g.moveTo(A.x,my); g.quadraticCurveTo(mx,cy,tx,ty); g.stroke();
+    g.strokeStyle='rgba(255,224,236,.9)'; g.lineWidth=2.8*sc;   // the wet
+    g.beginPath(); g.moveTo(A.x,my); g.quadraticCurveTo(mx,cy-2*sc,tx,ty-1.5*sc); g.stroke();
+    g.fillStyle='#ff7aa0';                              // the tip
+    g.beginPath(); g.arc(tx,ty,6.5*sc,0,7); g.fill();
+    g.strokeStyle='#8e1838'; g.lineWidth=1.6; g.stroke();
+    g.fillStyle='rgba(255,235,242,.85)';
+    g.beginPath(); g.arc(tx-1.6*sc,ty-1.8*sc,1.8*sc,0,7); g.fill();
+    g.globalAlpha=1;
+  }
+  /* THE TRIP's colour, over everything at once: a slow-crawling rainbow
+     composited in 'hue' mode, which replaces what colour things ARE while
+     leaving how BRIGHT they are alone. That one property is the safety
+     line — the maze stays readable by luminance while every hue on the
+     screen lies. Floats and HUD draw after this, so the score always tells
+     the truth in its own colours. */
+  { const A=tripA();
+    if(A>0){
+      const ph=frame*0.4;
+      const rg=g.createLinearGradient(0,HUD,RW,HUD+RH);
+      for(let i=0;i<=6;i++)
+        rg.addColorStop(i/6,'hsl('+((ph+i*60)%360)+',85%,55%)');
+      g.globalCompositeOperation='hue';
+      g.globalAlpha=0.55*A;
+      g.fillStyle=rg; g.fillRect(0,HUD,RW,RH);
+      g.globalCompositeOperation='source-over'; g.globalAlpha=1;
+    } }
   /* score popups — drawn above everything, faded out on their timer */
   for(const f of floats){
     const p=proj(f.wx, f.wy, f.wz);
@@ -2086,6 +2735,10 @@ window.HighMazeLayer={
        COLS, ROWS, TW, TH, WZ, D0, F, CAMH, CAM_MIN, CAM_MAX,
        MAZE, MAZE_EGYPT, MAZE_GROVE, MAZE_FOUNDRY, MAZE_CAUSEWAY,
        THEMES, THEME_ORDER, HOUSE, DOOR, PEN, BONUS_TILE, CASTS, CAT_CAST, GHOST_DEF,
+       TONGUE_R, isWall, RUGS, RUG_PLAYER, get tongues(){return tongues;},
+       get tripT(){return tripT;}, set tripT(v){tripT=v;}, TRIP_T, tripA,
+       get frightT(){return frightT;}, set frightT(v){frightT=v;},
+       get ghosts(){return ghosts;}, get chain(){return chain;},
        get pills(){return pills;}, get speedT(){return speedT;},
        tideFactor, tideHigh, TIDE_CYCLE,
        get lifts(){return lifts;}, get ride(){return ride;}, LIFT_Z, BOARD_T,

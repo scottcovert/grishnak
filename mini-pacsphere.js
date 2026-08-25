@@ -242,10 +242,12 @@ const ghoPass=(id,g)=>{ const ch=CELLS[id].ch;
 
 /* --- game state --- */
 const GHDEF=[
-  {col:'#ff4a4a', name:'blinky', penT:0},
-  {col:'#ffb0d8', name:'pinky',  penT:120},
-  {col:'#5ad4e8', name:'inky',   penT:480},
-  {col:'#ffb35a', name:'clyde',  penT:900}];
+  /* DE-PAC (2026-08-25): the hunters wear valley names now — names are the
+     colours, per the law next door. Same posts, same personalities. */
+  {col:'#ff4a4a', name:'ember', penT:0},
+  {col:'#ffb0d8', name:'rose',  penT:120},
+  {col:'#5ad4e8', name:'teal',  penT:480},
+  {col:'#ffb35a', name:'amber', penT:900}];
 const PSPD=0.0085, GSPD=0.0078, FSPD=0.0050 /* retired 2026-08-19: blue = frozen */, ESPD=0.0165;
 const FRIGHT0=540;
 /* --- the JUMP (Scott 2026-08-12): SPACE hops pac in a clean arc.
@@ -455,7 +457,7 @@ function sphereClear(){
 }
 
 /* --- ghosts --- */
-function pinkyTarget(){
+function roseTarget(){   /* four steps ahead of your nose — the ambusher's aim */
   let id=pac.a, d=H;
   for(let k=0;k<4;k++){
     const nd=pickStraight(id, d, x=>CELLS[x].ch!=='#');
@@ -470,14 +472,14 @@ function ghostTarget(g,gi){
   if(frightT>0) return null;                       // random
   if(scatter) return CELLS[g.scat].Q;
   if(gi===0) return pacPos();
-  if(gi===1) return pinkyTarget();
+  if(gi===1) return roseTarget();
   if(gi===2) return pacPos();       // its old private 25% whim moved into WILD, where everyone has one
   return ad(ghostPos(g),pacPos())>1.1? pacPos() : CELLS[g.scat].Q;
 }
 /* THE WHIM (Scott 2026-08-18: "add some added randomization to monster
    movements, right now they seem mostly to just zero in on the player").
    At every junction each hunter rolls against its own wildness — a hit and
-   it takes a random legal turn instead of the greedy one. Blinky stays the
+   it takes a random legal turn instead of the greedy one. Ember stays the
    professional; the others get progressively flightier. Eyes flying home
    and pen exits never wander. */
 const WILD=[0.10,0.25,0.38,0.50];
